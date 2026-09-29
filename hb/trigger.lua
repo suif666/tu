@@ -17,7 +17,7 @@ if getgenv().__HB_TRIGGER_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.HBTriggerTab) or getgenv().SutureHBHBTriggerTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.HBTriggerTab) or getgenv().SutureHBTriggerTab
 if not Tab then
 	warn("[触发类] 未找到页签（主脚本没赋值 getgenv().Tabs.HBTriggerTab？）")
 	return
