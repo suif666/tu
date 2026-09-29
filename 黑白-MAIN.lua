@@ -356,7 +356,7 @@ end)(function()
 			end
 
 			if not v then
-				local v2, v3 = fn11("https://raw.githubusercontent.com/tfcygvunbind/Apple/main/78911367", 1000, 3)
+				local v2, v3 = fn11("https://raw.githubusercontent.com/suif666/suif/refs/heads/main/WindUI-Boreal.lua", 1000, 3)
 
 				if v2 then
 					local ok_, result = pcall(function()
@@ -388,7 +388,7 @@ end)(function()
 					task.wait(5)
 
 					pcall(function()
-						local v2 = fn11("https://raw.githubusercontent.com/tfcygvunbind/Apple/main/78911367", 1000, 2)
+						local v2 = fn11("https://raw.githubusercontent.com/suif666/suif/refs/heads/main/WindUI-Boreal.lua", 1000, 2)
 
 						if v2 then
 							local ok_, result = pcall(function()
