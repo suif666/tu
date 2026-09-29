@@ -905,4 +905,7 @@ if not ok then
 	warn("[NPC交互] 构建失败: " .. tostring(err))
 	pcall(notify, "NPC交互", "构建失败: " .. tostring(err), "x")
 	getgenv().__HB_NPC_LOADED = nil   -- 清掉标志位，允许再点一次重试
+else
+	-- 成功也打一条到控制台，方便排查「页签是空的」这类问题
+	print("[黑白提取] 远程模块已加载: NPC交互 (" .. tostring(#Tab.Elements or 0) .. " 个元素)")
 end
