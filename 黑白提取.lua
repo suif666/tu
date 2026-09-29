@@ -235,6 +235,52 @@ local objectTab  = secGongneng:Tab({ Title = "控制物体", Icon = "box",    Lo
 -- 所以这里统一挂到 getgenv() 上，远程脚本按需取用。
 -- 这也是 suif.lua 那套远程脚本的做法（getgenv().Tabs.XxxTab）。
 --==============================================================
+--==============================================================
+-- 重跑清场（重要）
+--
+-- 远程脚本用 getgenv().__HB_XXX_LOADED 防重复加载。如果不在这里清掉，
+-- 第二次执行主脚本（不重进游戏）时，远程脚本一进去就看到标志位是 true，
+-- 直接 return —— 页签建出来了但里面是空的。
+--
+-- 另外把上一次留下的窗口和旧页签引用一起清掉，避免多窗口叠加、
+-- 以及远程脚本拿到已经被销毁的旧页签对象。
+-- 注意：只删 HB_ 开头的键，不动 getgenv().Tabs 里别的脚本的页签。
+--==============================================================
+local HB_KEYS = {
+	{ "Anim",     "HB_AnimTab" },
+	{ "Action",   "HB_AnimTab" },
+	{ "AnimPack", "HB_AnimTab" },
+	{ "Disguise", "HB_DisguiseTab" },
+	{ "SlowRun",  "HB_SlowRunTab" },
+	{ "Clicker",  "HB_ClickerTab" },
+	{ "NPC",      "HB_NPCTab" },
+	{ "Trigger",  "HB_TriggerTab" },
+	{ "Object",   "HB_ObjectTab" },
+}
+
+for _, kv in ipairs(HB_KEYS) do
+	getgenv()["__HB_" .. string.upper(kv[1]) .. "_LOADED"] = nil
+end
+
+if getgenv().Tabs then
+	for _, kv in ipairs(HB_KEYS) do
+		getgenv().Tabs[kv[2]] = nil
+	end
+end
+
+do
+	local oldWin = getgenv().HB_win
+	if oldWin then
+		pcall(function()
+			oldWin:Destroy()
+		end)
+		pcall(function()
+			oldWin:Close()
+		end)
+	end
+	getgenv().HB_win = nil
+end
+
 getgenv().HB_WindUI   = WindUI
 getgenv().HB_notify   = notify
 getgenv().HB_readInput = readInput
