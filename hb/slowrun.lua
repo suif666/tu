@@ -17,7 +17,7 @@ if getgenv().__HB_SLOWRUN_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.PlayerTab) or getgenv().SutureHBPlayerTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.PlayerTab) or getgenv().SuturePlayerTab
 if not Tab then
 	warn("[缓慢的快速跑] 未找到页签（主脚本没赋值 getgenv().Tabs.PlayerTab？）")
 	return
