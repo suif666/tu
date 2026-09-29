@@ -17,7 +17,7 @@ if getgenv().__HB_CLICKER_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.ToolTab) or getgenv().SutureHBToolTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.ToolTab) or getgenv().SutureToolTab
 if not Tab then
 	warn("[自动连点器] 未找到页签（主脚本没赋值 getgenv().Tabs.ToolTab？）")
 	return
