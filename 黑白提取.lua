@@ -346,7 +346,7 @@ disguiseSec:Paragraph({
 	Desc = "先填要伪装成的 Roblox 用户名，再填要改的目标玩家名",
 	Image = "info",
 	ImageSize = 16,
-	Color = "Grey",
+	Color3.fromRGB(72, 72, 72),
 })
 
 local disguiseNameInput = disguiseSec:Input({
@@ -678,7 +678,7 @@ remoteSec:Paragraph({
 	Desc = "解锁所有商城动画：MoonSec V3 混淆（约 553 KB）\n缓慢的快速跑：wearedevs 混淆（约 172 KB）",
 	Image = "alert-triangle",
 	ImageSize = 16,
-	Color = "Yellow",
+	Color3.fromRGB(244, 201, 72),
 })
 
 local function runRemote(url, label)
@@ -1296,7 +1296,7 @@ return function(win, ctx)
 • 自定义动画包：开启后可使用自定义动画]],
 		Image = "info",
 		ImageSize = 16,
-		Color = "Grey",
+		Color = Color3.fromRGB(72, 72, 72),
 	})
 
 	----------------------------------------------------------------------------
@@ -1950,7 +1950,7 @@ return function(win, ctx)
 		Desc = "加号=添加点位，减号=删除最后一个点位，垃圾桶=关闭面板；\n圆点可以直接拖动到要连点的位置。",
 		Image = "mouse-pointer-click",
 		ImageSize = 16,
-		Color = "Grey",
+		Color = Color3.fromRGB(72, 72, 72),
 	})
 
 	--==============================================================
@@ -2866,7 +2866,7 @@ return function(win, ctx)
 		Desc = "源脚本里下拉框选中(tbl6.selected)和鼠标点选(v6)是两套独立状态，这里保持原样：先开「点击选择NPC」再点场景里的NPC即可。",
 		Image = "info",
 		ImageSize = 16,
-		Color = "Grey",
+		Color = Color3.fromRGB(72, 72, 72),
 	})
 
 	-- 源 7766：npc:Toggle({Title="点击选择NPC", Callback=fn32})
@@ -4719,7 +4719,7 @@ return function(win, ctx)
 		"• 透视功能可高亮显示可互动对象位置",
 		"• 触发范围圈可视化显示影响范围",
 	}) do
-		secInfo:Paragraph({ Title = "", Desc = line, Image = "info", ImageSize = 14, Color = "Grey" })
+		secInfo:Paragraph({ Title = "", Desc = line, Image = "info", ImageSize = 14, Color = Color3.fromRGB(72, 72, 72) })
 	end
 
 	-- 执行器缺函数时给一条醒目提示
@@ -4747,7 +4747,7 @@ return function(win, ctx)
 			Desc = "当前环境没有：" .. table.concat(missing, "、") .. "。相关按钮点了只会提示，不会报错。",
 			Image = "alert-triangle",
 			ImageSize = 16,
-			Color = "Yellow",
+			Color = Color3.fromRGB(244, 201, 72),
 		})
 	end
 
@@ -4776,10 +4776,22 @@ end
 end)()
 
 -- 统一实例化各模块
-buildActionPack(win, ctx)   -- 动作包
-buildAnimPack(win, ctx)   -- 动画包
-buildAutoClicker(win, ctx)   -- 自动连点器
-buildNPC(win, ctx)   -- NPC交互
-buildTrigger(win, ctx)   -- 触发类
+
+-- 每个模块都单独 pcall：某一节出错只弹一条通知，不会连累后面的页签
+-- （之前 Color = "Yellow" 那种错误会直接中断整个脚本，导致后面的页签全都不出现）
+local function loadModule(name, fn)
+	local ok, err = pcall(fn, win, ctx)
+	if not ok then
+		pcall(notify, "模块加载失败", name .. "：" .. tostring(err), "x")
+		print(string.format("[黑白提取] 模块 %s 加载失败: %s", name, tostring(err)))
+	end
+	return ok
+end
+
+loadModule("动作包", buildActionPack)
+loadModule("动画包", buildAnimPack)
+loadModule("自动连点器", buildAutoClicker)
+loadModule("NPC交互", buildNPC)
+loadModule("触发类", buildTrigger)
 
 notify("黑白提取", "已加载（动作包 / 动画包 / 自动连点器 / NPC交互 / 触发类）", "check")
