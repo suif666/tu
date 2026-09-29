@@ -480,9 +480,46 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = parent
 
 -- 主窗
+-- 窗口尺寸：按视口算，默认只占屏幕一小块。右下角有拖拽手柄可调，尺寸会记住。
+local function getViewport()
+	local cam = workspace.CurrentCamera
+	if cam then
+		local ok, v = pcall(function() return cam.ViewportSize end)
+		if ok and v then return v end
+	end
+	return Vector2.new(1280, 720)
+end
+
+local function loadRect()
+	if type(isfile) ~= "function" or type(readfile) ~= "function" then return nil end
+	local fp = CONFIG.OUT_DIR .. "/ui.txt"
+	local ok, f = pcall(isfile, fp)
+	if not ok or not f then return nil end
+	local ok2, txt = pcall(readfile, fp)
+	if not ok2 or type(txt) ~= "string" then return nil end
+	local w, h, x, y = txt:match("(%d+),(%d+),(%-?%d+),(%-?%d+)")
+	if w then return tonumber(w), tonumber(h), tonumber(x), tonumber(y) end
+	return nil
+end
+
+local VP = getViewport()
+local savedW, savedH, savedX, savedY = loadRect()
+
+-- 默认只占屏幕一小块：宽约 42%、高约 50%
+local defW = math.clamp(math.floor(VP.X * 0.42), 400, 620)
+local defH = math.clamp(math.floor(VP.Y * 0.50), 300, 460)
+
+-- 记住的尺寸也要夹回当前视口，否则换显示器/改分辨率后窗口会跑到屏幕外
+local maxW = math.max(380, VP.X - 30)
+local maxH = math.max(240, VP.Y - 30)
+local sW = math.clamp(savedW or defW, 380, maxW)
+local sH = math.clamp(savedH or defH, 240, maxH)
+local sX = math.clamp(savedX or math.floor((VP.X - sW) / 2), 0, math.max(0, VP.X - sW))
+local sY = math.clamp(savedY or math.floor((VP.Y - sH) / 3), 0, math.max(0, VP.Y - sH))
+
 local win = Instance.new("Frame")
-win.Size = UDim2.new(0, 760, 0, 520)
-win.Position = UDim2.new(0.5, -380, 0.5, -260)
+win.Size = UDim2.new(0, sW, 0, sH)
+win.Position = UDim2.new(0, sX, 0, sY)
 win.BackgroundColor3 = C.bg
 win.BorderSizePixel = 0
 win.Parent = gui
@@ -490,7 +527,7 @@ corner(win, 10)
 
 -- 标题栏（可拖动）
 local title = Instance.new("Frame")
-title.Size = UDim2.new(1, 0, 0, 42)
+title.Size = UDim2.new(1, 0, 0, 36)
 title.BackgroundColor3 = C.panel
 title.BorderSizePixel = 0
 title.Active = true
@@ -504,12 +541,12 @@ titleFix.BackgroundColor3 = C.panel
 titleFix.BorderSizePixel = 0
 titleFix.Parent = title
 
-local titleText = mkLabel(title, "  音频提取器", 16, UDim2.new(0, 0, 0, 0), C.text, true)
+local titleText = mkLabel(title, "  音频提取器", 14, UDim2.new(0, 0, 0, 0), C.text, true)
 titleText.Size = UDim2.new(1, -60, 1, 0)
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 34, 0, 26)
-closeBtn.Position = UDim2.new(1, -40, 0.5, -13)
+closeBtn.Position = UDim2.new(1, -38, 0.5, -12)
 closeBtn.BackgroundColor3 = C.bad
 closeBtn.Text = "X"
 closeBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -546,79 +583,93 @@ end
 
 -- 工具栏
 local bar = Instance.new("Frame")
-bar.Size = UDim2.new(1, -24, 0, 36)
-bar.Position = UDim2.new(0, 12, 0, 54)
+bar.Size = UDim2.new(1, -24, 0, 28)
+bar.Position = UDim2.new(0, 12, 0, 42)
 bar.BackgroundTransparency = 1
 bar.Parent = win
 
-local btnScan = mkButton(bar, "重新扫描", 84, C.accent)
-btnScan.Position = UDim2.new(0, 0, 0, 0)
+-- 小窗下面板变窄，7 个按钮按像素排一行，字号缩到 12 保证不挤
+local BTN = { { "重新扫描", 60, C.accent }, { "全选", 38 }, { "清空", 38 },
+              { "下载选中", 60, C.ok }, { "停止", 38, C.bad },
+              { "导出清单", 52 }, { "诊断下载", 52, C.warn } }
+local bx = 0
+local barBtns = {}
+for i, d in ipairs(BTN) do
+	local b = mkButton(bar, d[1], d[2], d[3])
+	b.Size = UDim2.new(0, d[2], 1, 0)
+	b.Position = UDim2.new(0, bx, 0, 0)
+	b.TextSize = 12
+	barBtns[i] = b
+	bx = bx + d[2] + 5
+end
+local btnScan, btnSelAll, btnSelNone = barBtns[1], barBtns[2], barBtns[3]
+local btnDownload, btnStop = barBtns[4], barBtns[5]
+local btnExport, btnDiag = barBtns[6], barBtns[7]
 
-local btnSelAll = mkButton(bar, "全选", 56)
-btnSelAll.Position = UDim2.new(0, 90, 0, 0)
+-- 搜索框单独一行，占满宽度
+local bar2 = Instance.new("Frame")
+bar2.Size = UDim2.new(1, -24, 0, 26)
+bar2.Position = UDim2.new(0, 12, 0, 74)
+bar2.BackgroundTransparency = 1
+bar2.Parent = win
 
-local btnSelNone = mkButton(bar, "清空", 56)
-btnSelNone.Position = UDim2.new(0, 152, 0, 0)
-
-local btnDownload = mkButton(bar, "下载选中", 84, C.ok)
-btnDownload.Position = UDim2.new(0, 214, 0, 0)
-
-local btnStop = mkButton(bar, "停止", 56, C.bad)
-btnStop.Position = UDim2.new(0, 304, 0, 0)
-
-local btnExport = mkButton(bar, "导出清单", 84)
-btnExport.Position = UDim2.new(0, 366, 0, 0)
-
-local btnDiag = mkButton(bar, "诊断下载", 84, C.warn)
-btnDiag.Position = UDim2.new(0, 458, 0, 0)
-
--- 搜索框
 local searchBox = Instance.new("TextBox")
-searchBox.Size = UDim2.new(0, 230, 0, 30)
-searchBox.Position = UDim2.new(1, -236, 0, 3)
+searchBox.Size = UDim2.new(1, 0, 1, 0)
+searchBox.Position = UDim2.new(0, 0, 0, 0)
 searchBox.BackgroundColor3 = C.panel2
 searchBox.Text = ""
 searchBox.PlaceholderText = "搜索名字 / AssetId / 路径"
 searchBox.TextColor3 = C.text
 searchBox.PlaceholderColor3 = C.dim
-searchBox.TextSize = 13
+searchBox.TextSize = 12
 searchBox.Font = Enum.Font.Gotham
 searchBox.BorderSizePixel = 0
 searchBox.ClearTextOnFocus = false
-searchBox.Parent = bar
+searchBox.Parent = bar2
 corner(searchBox, 5)
 pad(searchBox, 6)
 
 -- 列表（表头 + 滚动区）
 local header = Instance.new("Frame")
-header.Size = UDim2.new(1, -24, 0, 24)
-header.Position = UDim2.new(0, 12, 0, 96)
+header.Size = UDim2.new(1, -24, 0, 20)
+header.Position = UDim2.new(0, 12, 0, 104)
 header.BackgroundColor3 = C.panel
 header.BorderSizePixel = 0
 header.Parent = win
 
-local function headerCell(txt, x, w, align)
+-- 列宽：左边固定像素，右边从右往左贴边，中间「名字」占剩余宽度。
+-- 这样窗口拉窄也不会把右边的按钮挤出去。
+local COL = {
+	chk  = { UDim2.new(0, 6),    UDim2.new(0, 18) },
+	name = { UDim2.new(0, 28),   UDim2.new(1, -248) },
+	len  = { UDim2.new(1, -216), UDim2.new(0, 40) },
+	id   = { UDim2.new(1, -172), UDim2.new(0, 88) },
+	play = { UDim2.new(1, -124), UDim2.new(0, 56) },
+	down = { UDim2.new(1, -64),  UDim2.new(0, 56) },
+}
+
+local function headerCell(txt, spec, align)
 	local l = Instance.new("TextLabel")
 	l.BackgroundTransparency = 1
 	l.Text = txt
-	l.TextSize = 12
+	l.TextSize = 11
 	l.Font = Enum.Font.GothamBold
 	l.TextColor3 = C.dim
 	l.TextXAlignment = align or Enum.TextXAlignment.Left
-	l.Size = UDim2.new(0, w, 1, 0)
-	l.Position = UDim2.new(0, x, 0, 0)
+	l.Size = spec[2]
+	l.Position = spec[1]
 	l.Parent = header
 	return l
 end
-headerCell("选中", 10, 44, Enum.TextXAlignment.Center)
-headerCell("名字", 60, 210)
-headerCell("时长", 274, 66)
-headerCell("AssetId", 344, 130)
-headerCell("操作", 484, 240, Enum.TextXAlignment.Center)
+headerCell("选", COL.chk, Enum.TextXAlignment.Center)
+headerCell("名字", COL.name)
+headerCell("时长", COL.len)
+headerCell("AssetId", COL.id, Enum.TextXAlignment.Right)
+headerCell("操作", COL.down, Enum.TextXAlignment.Right)
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -24, 1, -206)
-scroll.Position = UDim2.new(0, 12, 0, 122)
+scroll.Size = UDim2.new(1, -24, 1, -188)
+scroll.Position = UDim2.new(0, 12, 0, 126)
 scroll.BackgroundColor3 = C.panel
 scroll.BorderSizePixel = 0
 scroll.ScrollBarThickness = 6
@@ -636,36 +687,82 @@ pad(scroll, 4)
 
 -- 底部状态栏
 local footer = Instance.new("Frame")
-footer.Size = UDim2.new(1, -24, 0, 68)
-footer.Position = UDim2.new(0, 12, 1, -80)
+footer.Size = UDim2.new(1, -24, 0, 50)
+footer.Position = UDim2.new(0, 12, 1, -56)
 footer.BackgroundColor3 = C.panel
 footer.BorderSizePixel = 0
 footer.Parent = win
 corner(footer, 6)
 
-local statusText = mkLabel(footer, "  就绪。点「重新扫描」开始。", 13, UDim2.new(0, 0, 0, 4), C.text)
-statusText.Size = UDim2.new(1, -220, 0, 20)
+local statusText = mkLabel(footer, "就绪。点「重新扫描」开始。", 11, UDim2.new(0, 6, 0, 2), C.text)
+statusText.Size = UDim2.new(1, -86, 0, 16)
+statusText.TextTruncate = Enum.TextTruncate.AtEnd
 
-local countText = mkLabel(footer, "  共 0 条 / 已选 0", 12, UDim2.new(0, 0, 0, 24), C.dim)
-countText.Size = UDim2.new(1, -220, 0, 18)
+local countText = mkLabel(footer, "共 0 条 / 已选 0", 11, UDim2.new(0, 6, 0, 18), C.dim)
+countText.Size = UDim2.new(1, -86, 0, 15)
+
+local previewLabel = mkLabel(footer, "试听: 无", 10, UDim2.new(0, 6, 0, 33), C.dim)
+previewLabel.Size = UDim2.new(1, -86, 0, 14)
+previewLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 -- 试听控制
-local btnPreviewStop = mkButton(footer, "停止试听", 84, C.warn)
-btnPreviewStop.Size = UDim2.new(0, 84, 0, 26)
-btnPreviewStop.Position = UDim2.new(1, -96, 0, 6)
+local btnPreviewStop = mkButton(footer, "停止试听", 74, C.warn)
+btnPreviewStop.Size = UDim2.new(0, 74, 0, 22)
+btnPreviewStop.Position = UDim2.new(1, -80, 0, 14)
+btnPreviewStop.TextSize = 11
 btnPreviewStop.Visible = false
-
-local previewLabel = mkLabel(footer, "  试听: 无", 12, UDim2.new(0, 0, 0, 44), C.dim)
-previewLabel.Size = UDim2.new(1, -220, 0, 18)
 
 -- 进度条
 local progBg = Instance.new("Frame")
-progBg.Size = UDim2.new(1, -24, 0, 4)
+progBg.Size = UDim2.new(1, -40, 0, 4)
 progBg.Position = UDim2.new(0, 12, 1, -6)
 progBg.BackgroundColor3 = C.panel2
 progBg.BorderSizePixel = 0
 progBg.Parent = win
 corner(progBg, 2)
+
+-- 右下角拖拽缩放手柄：觉得窗小/窗大都直接拉
+local grip = Instance.new("TextButton")
+grip.Size = UDim2.new(0, 20, 0, 20)
+grip.Position = UDim2.new(1, -22, 1, -22)
+grip.BackgroundTransparency = 1
+grip.Text = "◢"
+grip.TextColor3 = C.dim
+grip.TextSize = 12
+grip.TextXAlignment = Enum.TextXAlignment.Right
+grip.TextYAlignment = Enum.TextYAlignment.Bottom
+grip.AutoButtonColor = false
+grip.Parent = win
+
+do
+	local resizing, rStart, rW, rH = false, nil, 0, 0
+	grip.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			resizing = true
+			rStart = input.Position
+			rW = win.AbsoluteSize.X
+			rH = win.AbsoluteSize.Y
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					resizing = false
+				end
+			end)
+		end
+	end)
+	grip.InputChanged:Connect(function(input)
+		if not resizing then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch then
+			local d = input.Position - rStart
+			local maxW = math.max(420, VP.X - 30)
+			local maxH = math.max(300, VP.Y - 30)
+			local nw = math.clamp(rW + d.X, 380, maxW)
+			local nh = math.clamp(rH + d.Y, 240, maxH)
+			win.Size = UDim2.new(0, nw, 0, nh)
+		end
+	end)
+end
 
 local progFill = Instance.new("Frame")
 progFill.Size = UDim2.new(0, 0, 1, 0)
@@ -676,7 +773,7 @@ corner(progFill, 2)
 
 -- ═══════════════════ 界面操作 ═══════════════════
 local function setStatus(txt, color)
-	statusText.Text = "  " .. txt
+	statusText.Text = txt
 	statusText.TextColor3 = color or C.text
 end
 
@@ -687,7 +784,7 @@ end
 local function updateCount()
 	local n = 0
 	for _ in pairs(selected) do n = n + 1 end
-	countText.Text = string.format("  共 %d 条 / 已选 %d", #items, n)
+	countText.Text = string.format("共 %d 条 / 已选 %d", #items, n)
 end
 
 local function fmtLen(l)
@@ -711,7 +808,7 @@ local function stopPreview()
 	previewOwned = false
 	previewItem = nil
 	btnPreviewStop.Visible = false
-	previewLabel.Text = "  试听: 无"
+	previewLabel.Text = "试听: 无"
 end
 
 local function playPreview(item)
@@ -721,7 +818,7 @@ local function playPreview(item)
 		previewSound = item.obj
 		previewOwned = false
 		previewItem = item
-		previewLabel.Text = "  试听: " .. item.name .. "（游戏内正在播放）"
+		previewLabel.Text = "试听: " .. item.name .. "（游戏内正在播放）"
 		btnPreviewStop.Visible = true
 		return
 	end
@@ -745,10 +842,10 @@ local function playPreview(item)
 		s:Play()
 	end)
 	if ok then
-		previewLabel.Text = "  试听: " .. item.name .. "  (id " .. item.numId .. ")"
+		previewLabel.Text = "试听: " .. item.name .. "  (id " .. item.numId .. ")"
 		btnPreviewStop.Visible = true
 	else
-		local msg = "  试听失败（资源可能不可访问）: " .. item.name
+		local msg = "试听失败（资源可能不可访问）: " .. item.name
 		stopPreview()
 		previewLabel.Text = msg
 	end
@@ -791,7 +888,7 @@ local function renderList()
 			end
 
 			local row = Instance.new("Frame")
-			row.Size = UDim2.new(1, -8, 0, 30)
+			row.Size = UDim2.new(1, -8, 0, 26)
 			row.BackgroundColor3 = (shown % 2 == 0) and C.row1 or C.row2
 			row.BorderSizePixel = 0
 			row.LayoutOrder = shown
@@ -801,49 +898,54 @@ local function renderList()
 
 			-- 勾选
 			local chk = Instance.new("TextButton")
-			chk.Size = UDim2.new(0, 22, 0, 22)
-			chk.Position = UDim2.new(0, 16, 0.5, -11)
+			chk.Size = UDim2.new(0, 18, 0, 18)
+			chk.Position = COL.chk[1] + UDim2.new(0, 0, 0.5, -9)
 			chk.BackgroundColor3 = selected[item] and C.accent or C.panel2
 			chk.Text = selected[item] and "✓" or ""
 			chk.TextColor3 = Color3.new(1, 1, 1)
-			chk.TextSize = 14
+			chk.TextSize = 12
 			chk.Font = Enum.Font.GothamBold
 			chk.BorderSizePixel = 0
 			chk.Parent = row
 			corner(chk, 4)
 
-			-- 名字
-			local nm = mkLabel(row, item.name, 13, UDim2.new(0, 60, 0, 0), C.text)
-			nm.Size = UDim2.new(0, 210, 1, 0)
-			nm.TextTruncate = Enum.TextTruncate.AtEnd
+			-- 名字（下载状态直接体现在这一列的颜色和前缀上，省掉一整列）
+			local label = item.name
 			if item.refs and item.refs > 1 then
-				nm.Text = item.name .. "  ×" .. item.refs
+				label = item.name .. "  ×" .. item.refs
 			end
+			local nameColor = C.text
+			if item.file then
+				label = "✓ " .. label
+				nameColor = C.ok
+			elseif item.err then
+				nameColor = C.bad
+			end
+			local nm = mkLabel(row, label, 12, COL.name[1], nameColor)
+			nm.Size = COL.name[2]
+			nm.TextTruncate = Enum.TextTruncate.AtEnd
 
 			-- 时长
-			local ln = mkLabel(row, fmtLen(item.len), 12, UDim2.new(0, 274, 0, 0), C.dim)
-			ln.Size = UDim2.new(0, 66, 1, 0)
+			local ln = mkLabel(row, fmtLen(item.len), 11, COL.len[1], C.dim)
+			ln.Size = COL.len[2]
 
 			-- AssetId
-			local idl = mkLabel(row, item.numId, 11, UDim2.new(0, 344, 0, 0), C.dim)
-			idl.Size = UDim2.new(0, 130, 1, 0)
+			local idl = mkLabel(row, item.numId, 9, COL.id[1], C.dim)
+			idl.Size = COL.id[2]
 			idl.Font = Enum.Font.Code
+			idl.TextXAlignment = Enum.TextXAlignment.Right
 
 			-- 试听
 			local bp = mkButton(row, "试听", 56, C.panel2)
-			bp.Size = UDim2.new(0, 56, 0, 22)
-			bp.Position = UDim2.new(0, 484, 0.5, -11)
+			bp.Size = UDim2.new(0, 52, 0, 20)
+			bp.Position = COL.play[1] + UDim2.new(0, 0, 0.5, -10)
+			bp.TextSize = 11
 
 			-- 下载这一个
 			local bd = mkButton(row, "下载", 56, C.panel2)
-			bd.Size = UDim2.new(0, 56, 0, 22)
-			bd.Position = UDim2.new(0, 546, 0.5, -11)
-
-			-- 状态
-			local st = mkLabel(row, item.file and "已保存" or "", 11,
-				UDim2.new(0, 610, 0, 0), item.file and C.ok or C.dim)
-			st.Size = UDim2.new(0, 120, 1, 0)
-			st.TextTruncate = Enum.TextTruncate.AtEnd
+			bd.Size = UDim2.new(0, 52, 0, 20)
+			bd.Position = COL.down[1] + UDim2.new(0, 0, 0.5, -10)
+			bd.TextSize = 11
 
 			-- 事件
 			chk.MouseButton1Click:Connect(function()
@@ -868,12 +970,11 @@ local function renderList()
 				end
 				startDownload({ item }, function(ok)
 					if ok then
-						st.Text = "已保存"
-						st.TextColor3 = C.ok
+						nm.TextColor3 = C.ok
+						nm.Text = "✓ " .. nm.Text
 					else
-						st.Text = item.err or "失败"
-						st.TextColor3 = C.bad
-						st.TextSize = 10
+						nm.TextColor3 = C.bad
+						setStatus((item.name .. " 失败: " .. (item.err or "未知")), C.bad)
 					end
 				end)
 			end)
@@ -1185,6 +1286,22 @@ btnPreviewStop.MouseButton1Click:Connect(function()
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
+	if type(writefile) == "function" then
+		local ok = pcall(function()
+			local sz = win.AbsoluteSize
+			local ps = win.AbsolutePosition
+			if type(makefolder) == "function" then
+				pcall(makefolder, CONFIG.OUT_DIR)
+			end
+			writefile(CONFIG.OUT_DIR .. "/ui.txt",
+				string.format("%d,%d,%d,%d",
+					math.floor(sz.X), math.floor(sz.Y),
+					math.floor(ps.X), math.floor(ps.Y)))
+		end)
+		if not ok then
+			-- 记不住就算了，不影响关闭
+		end
+	end
 	stopPreview()
 	if previewSound then
 		pcall(function() previewSound:Destroy() end)
