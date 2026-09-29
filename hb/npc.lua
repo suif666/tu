@@ -17,7 +17,7 @@ if getgenv().__HB_NPC_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.HBNPCTab) or getgenv().SutureHBHBNPCTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.HBNPCTab) or getgenv().SutureHBNPCTab
 if not Tab then
 	warn("[NPC交互] 未找到页签（主脚本没赋值 getgenv().Tabs.HBNPCTab？）")
 	return
