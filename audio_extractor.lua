@@ -45,43 +45,88 @@ local function hasFS()
 end
 
 -- ═══════════════════ HTTP ═══════════════════
-local function httpGet(url)
+-- 取执行器能拿到的 Roblox 登录 cookie。
+-- 只用于向 assetdelivery.roblox.com（Roblox 自己的服务器）请求你自己游戏里的资源，
+-- 和 Roblox 客户端做的事完全一样。绝不会打印、绝不会发往其它域名。
+local function getCookie()
+	local cands = {
+		function() return getcookie and getcookie() end,
+		function() return syn and syn.getcookie and syn.getcookie() end,
+		function() return GetCookie and GetCookie() end,
+		function() return getgenv and getgenv().getcookie and getgenv().getcookie() end,
+	}
+	for _, f in ipairs(cands) do
+		local ok, c = pcall(f)
+		if ok and type(c) == "string" and #c > 20 then
+			return c
+		end
+	end
+	return nil
+end
+
+local COOKIE = getCookie()
+
+-- 统一的 HTTP GET
+-- 返回 body, status, headers
+local function httpRaw(url, useCookie)
+	local req = { Url = url, Method = "GET" }
+	if useCookie and COOKIE then
+		req.Headers = { ["Cookie"] = ".ROBLOSECURITY=" .. COOKIE }
+	end
+
 	if type(request) == "function" then
-		local ok, r = pcall(request, { Url = url, Method = "GET" })
-		if ok and type(r) == "table" and r.Body then
+		local ok, r = pcall(request, req)
+		if ok and type(r) == "table" and r.Body ~= nil then
 			HTTP_METHOD_USED = HTTP_METHOD_USED or "request"
-			return r.Body
+			return r.Body, r.StatusCode, r.Headers
 		end
 	end
 	if type(http_request) == "function" then
-		local ok, r = pcall(http_request, { Url = url, Method = "GET" })
-		if ok and type(r) == "table" and r.Body then
+		local ok, r = pcall(http_request, req)
+		if ok and type(r) == "table" and r.Body ~= nil then
 			HTTP_METHOD_USED = HTTP_METHOD_USED or "http_request"
-			return r.Body
+			return r.Body, r.StatusCode, r.Headers
 		end
 	end
 	if syn and type(syn.request) == "function" then
-		local ok, r = pcall(syn.request, { Url = url, Method = "GET" })
-		if ok and type(r) == "table" and r.Body then
+		local ok, r = pcall(syn.request, req)
+		if ok and type(r) == "table" and r.Body ~= nil then
 			HTTP_METHOD_USED = HTTP_METHOD_USED or "syn.request"
-			return r.Body
+			return r.Body, r.StatusCode, r.Headers
 		end
 	end
 	if http and type(http.request) == "function" then
-		local ok, r = pcall(http.request, { Url = url, Method = "GET" })
-		if ok and type(r) == "table" and r.Body then
+		local ok, r = pcall(http.request, req)
+		if ok and type(r) == "table" and r.Body ~= nil then
 			HTTP_METHOD_USED = HTTP_METHOD_USED or "http.request"
-			return r.Body
+			return r.Body, r.StatusCode, r.Headers
 		end
 	end
+	-- 兜底：game:HttpGet（走 Roblox 自己，通常自带客户端身份，但拿不到状态码）
 	local ok, r = pcall(function()
 		return game:HttpGet(url, true)
 	end)
 	if ok and type(r) == "string" and #r > 0 then
 		HTTP_METHOD_USED = HTTP_METHOD_USED or "game:HttpGet"
-		return r
+		return r, nil, nil
 	end
-	return nil
+	return nil, nil, nil
+end
+
+-- 自动跟随 302 跳转
+local function httpGet(url, useCookie)
+	local body, status, headers = httpRaw(url, useCookie)
+	if headers then
+		local loc = headers.Location or headers.location
+		if type(loc) == "table" then loc = loc[1] end
+		if type(loc) == "string" and loc ~= "" then
+			local b2, s2 = httpRaw(loc, useCookie)
+			if b2 and #b2 > 0 then
+				return b2, s2, headers
+			end
+		end
+	end
+	return body, status, headers
 end
 
 -- ═══════════════════ 格式识别 ═══════════════════
@@ -96,67 +141,177 @@ local function detectExt(data)
 	if b1 == 255 and (b2 == 251 or b2 == 243 or b2 == 242) then return "mp3" end
 	if head == "RIFF" then return "wav" end
 	if head == "fLaC" then return "flac" end
+	if head == "ftyp" or data:sub(5, 8) == "ftyp" then return "m4a" end
 	if head:sub(1, 1) == "{" then return "json" end
+	if head:sub(1, 1) == "<" then return "html" end
 	return "bin"
 end
 
+-- 判断拿到的是不是真的音频
+local function isAudio(data)
+	if not data or #data < 256 then return false end
+	local ext = detectExt(data)
+	return ext ~= "json" and ext ~= "html" and ext ~= "bin"
+end
+
+-- 把响应体变成一句人能看懂的说明
+local function explain(body, status)
+	if not body then return "无响应" end
+	if #body == 0 then return "空响应" end
+	if status then
+		if status == 401 or status == 403 then
+			return "HTTP " .. status .. " 鉴权被拒（需要登录态）"
+		end
+		if status == 404 then
+			return "HTTP 404 资源不存在或无权访问"
+		end
+		if status == 429 then
+			return "HTTP 429 请求太频繁被限流"
+		end
+	end
+	local code = body:match('"code"%s*:%s*(%d+)')
+	local msg = body:match('"message"%s*:%s*"([^"]+)"')
+	if code or msg then
+		return string.format("接口报错 code=%s %s", tostring(code), tostring(msg))
+	end
+	if body:sub(1, 1) == "<" then
+		return "返回了 HTML 页面（不是音频）"
+	end
+	return string.format("响应 %d 字节，不是音频", #body)
+end
+
+-- 从诊断记录里挑出最有信息量的一条失败原因
+local function shortReason(diag)
+	if not diag or #diag == 0 then
+		return nil
+	end
+	local best = nil
+	for _, d in ipairs(diag) do
+		if not d.ok then
+			if not best then
+				best = d
+			end
+			-- 鉴权类原因最有价值，优先展示
+			local n = d.note or ""
+			if n:find("鉴权", 1, true) or n:find("401", 1, true)
+				or n:find("403", 1, true) or n:find("code=", 1, true) then
+				best = d
+			end
+		end
+	end
+	if best then
+		return string.format("%s: %s", best.method, best.note)
+	end
+	return nil
+end
+
 -- ═══════════════════ 下载 ═══════════════════
-local function downloadOnce(assetId)
+-- 按「最可能成功」的顺序逐个尝试，并记录每一步的结果
+local function tryAll(assetId, collectDiag)
 	local id = tostring(assetId)
+	local diag = {}
 
-	for _, u in ipairs({
-		"https://assetdelivery.roblox.com/v1/asset/?id=" .. id,
-		"https://assetdelivery.roblox.com/v1/asset?id=" .. id,
-	}) do
-		local body = httpGet(u)
-		if body and #body > 1024 then
-			local ext = detectExt(body)
-			if ext ~= "json" and ext ~= "bin" then
-				return body, ext, "v1"
-			end
+	local function record(method, ok, note)
+		if collectDiag then
+			table.insert(diag, { method = method, ok = ok, note = note })
 		end
 	end
 
-	local v2 = httpGet("https://assetdelivery.roblox.com/v2/assetId/" .. id)
-	if v2 and #v2 > 0 then
-		local loc = v2:match('"location"%s*:%s*"([^"]+)"')
-		if loc then
-			local body = httpGet((loc:gsub("\\/", "/")))
-			if body and #body > 1024 then
-				local ext = detectExt(body)
-				if ext ~= "json" and ext ~= "bin" then
-					return body, ext, "v2-cdn"
-				end
-			end
+	local function accept(method, data, status)
+		if isAudio(data) then
+			record(method, true, string.format("%d 字节 %s", #data, detectExt(data)))
+			return data, detectExt(data), method
 		end
+		record(method, false, explain(data, status))
+		return nil
 	end
 
+	-- ① getcustomasset：走客户端自己的授权会话，对游戏内音频成功率最高
 	if type(getcustomasset) == "function" and type(FS.readfile) == "function" then
 		local ok, path = pcall(getcustomasset, "rbxassetid://" .. id)
 		if ok and type(path) == "string" then
 			local ok2, data = pcall(FS.readfile, path)
-			if ok2 and type(data) == "string" and #data > 1024 then
-				local ext = detectExt(data)
-				if ext ~= "json" and ext ~= "bin" then
-					return data, ext, "customasset"
-				end
+			if ok2 and type(data) == "string" then
+				local d, e, m = accept("getcustomasset", data, nil)
+				if d then return d, e, m, diag end
+			else
+				record("getcustomasset", false, "拿到路径但 readfile 读不了: " .. tostring(path):sub(1, 40))
 			end
+		else
+			record("getcustomasset", false, "调用失败（执行器可能不支持音频）")
 		end
 	end
 
-	return nil, nil, "失败"
+	-- ② 带 cookie 的 v1 直链
+	local urls = {
+		{ "v1+cookie", "https://assetdelivery.roblox.com/v1/asset/?id=" .. id, true },
+		{ "v1+cookie(serverplaceid)", "https://assetdelivery.roblox.com/v1/asset/?id=" .. id .. "&serverplaceid=0", true },
+		{ "v1", "https://assetdelivery.roblox.com/v1/asset/?id=" .. id, false },
+		{ "v1(serverplaceid)", "https://assetdelivery.roblox.com/v1/asset/?id=" .. id .. "&serverplaceid=0", false },
+	}
+	for _, u in ipairs(urls) do
+		local body, status = httpGet(u[2], u[3])
+		local d, e, m = accept(u[1], body, status)
+		if d then return d, e, m, diag end
+	end
+
+	-- ③ v2 拿 CDN 直链
+	for _, useCookie in ipairs({ true, false }) do
+		local tag = useCookie and "v2+cookie" or "v2"
+		local v2body, v2status = httpGet("https://assetdelivery.roblox.com/v2/assetId/" .. id, useCookie)
+		if v2body and #v2body > 0 then
+			local loc = v2body:match('"location"%s*:%s*"([^"]+)"')
+			if loc then
+				local body, status = httpGet((loc:gsub("\\/", "/")), false)
+				local d, e, m = accept(tag .. "-cdn", body, status)
+				if d then return d, e, m, diag end
+			else
+				record(tag, false, explain(v2body, v2status))
+			end
+		else
+			record(tag, false, explain(v2body, v2status))
+		end
+	end
+
+	-- ④ game:HttpGet 单独再试一次。
+	-- 它走 Roblox 自己的网络栈，通常自带客户端身份，和 request 的路径不一样，
+	-- 所以即使 request 拿到了非音频响应，这一步也可能成功。
+	for _, u in ipairs({
+		"https://assetdelivery.roblox.com/v1/asset/?id=" .. id,
+		"https://assetdelivery.roblox.com/v1/asset/?id=" .. id .. "&serverplaceid=0",
+	}) do
+		local ok, body = pcall(function()
+			return game:HttpGet(u, true)
+		end)
+		if ok and type(body) == "string" then
+			local d, e, m = accept("HttpGet", body, nil)
+			if d then return d, e, m, diag end
+		else
+			record("HttpGet", false, "game:HttpGet 调用失败")
+			break
+		end
+	end
+
+	return nil, nil, "失败", diag
+end
+
+local function downloadOnce(assetId)
+	local data, ext, how, diag = tryAll(assetId, false)
+	return data, ext, how, diag
 end
 
 local function downloadAudio(assetId)
 	local tries = math.max(1, CONFIG.RETRY)
 	local how = "失败"
+	local lastDiag = nil
 	for _ = 1, tries do
-		local data, ext, h = downloadOnce(assetId)
+		local data, ext, h, d = downloadOnce(assetId)
 		if data then return data, ext, h end
 		how = h
-		task.wait(0.1)
+		lastDiag = d
+		task.wait(0.15)
 	end
-	return nil, nil, how
+	return nil, nil, how, lastDiag
 end
 
 -- ═══════════════════ 状态 ═══════════════════
@@ -414,10 +569,13 @@ btnStop.Position = UDim2.new(0, 304, 0, 0)
 local btnExport = mkButton(bar, "导出清单", 84)
 btnExport.Position = UDim2.new(0, 366, 0, 0)
 
+local btnDiag = mkButton(bar, "诊断下载", 84, C.warn)
+btnDiag.Position = UDim2.new(0, 458, 0, 0)
+
 -- 搜索框
 local searchBox = Instance.new("TextBox")
-searchBox.Size = UDim2.new(0, 240, 0, 30)
-searchBox.Position = UDim2.new(1, -246, 0, 3)
+searchBox.Size = UDim2.new(0, 230, 0, 30)
+searchBox.Position = UDim2.new(1, -236, 0, 3)
 searchBox.BackgroundColor3 = C.panel2
 searchBox.Text = ""
 searchBox.PlaceholderText = "搜索名字 / AssetId / 路径"
@@ -713,8 +871,9 @@ local function renderList()
 						st.Text = "已保存"
 						st.TextColor3 = C.ok
 					else
-						st.Text = "失败"
+						st.Text = item.err or "失败"
 						st.TextColor3 = C.bad
+						st.TextSize = 10
 					end
 				end)
 			end)
@@ -763,6 +922,7 @@ startDownload = function(list, onEach)
 
 	task.spawn(function()
 		local okN, failN, totalBytes = 0, 0, 0
+		local failList = {}
 
 		for i, item in ipairs(list) do
 			if stopRequest then
@@ -778,7 +938,7 @@ startDownload = function(list, onEach)
 				okN = okN + 1
 				if onEach then onEach(true, item) end
 			else
-				local data, ext, how = downloadAudio(item.numId)
+				local data, ext, how, diag = downloadAudio(item.numId)
 				if data then
 					local safe = item.name:gsub("[\\/:*?\"<>|%%]", "_"):sub(1, 40)
 					local fname = string.format("%s/%s_%s.%s", dir, safe, item.numId, ext)
@@ -788,14 +948,19 @@ startDownload = function(list, onEach)
 						totalBytes = totalBytes + #data
 						item.file = fname
 						item.bytes = #data
+						item.method = how
 						if onEach then onEach(true, item) end
 					else
 						failN = failN + 1
+						item.err = "写文件失败"
+						table.insert(failList, item)
 						if onEach then onEach(false, item) end
 					end
 				else
 					failN = failN + 1
-					item.err = how
+					-- 把最后一次尝试里最有信息量的失败原因带出来
+					item.err = shortReason(diag) or how
+					table.insert(failList, item)
 					if onEach then onEach(false, item) end
 				end
 			end
@@ -814,6 +979,23 @@ startDownload = function(list, onEach)
 				okN, failN, totalBytes / 1024 / 1024), C.ok)
 		else
 			setStatus(string.format("完成：成功 %d，失败 %d", okN, failN), okN > 0 and C.ok or C.bad)
+		end
+
+		-- 失败时把原因打印出来，方便定位
+		if failN > 0 then
+			local seen = {}
+			print("[音频提取] 失败原因汇总:")
+			for _, it in ipairs(failList) do
+				local r = it.err or "未知"
+				seen[r] = (seen[r] or 0) + 1
+			end
+			for r, n in pairs(seen) do
+				print(string.format("   %d 个: %s", n, r))
+			end
+			for i = 1, math.min(#failList, 5) do
+				print(string.format("   例: %s  id=%s  %s",
+					failList[i].name, failList[i].numId, failList[i].err or "未知"))
+			end
 		end
 		renderList()
 	end)
@@ -928,7 +1110,75 @@ btnStop.MouseButton1Click:Connect(function()
 	end
 end)
 
+-- ═══════════════════ 诊断 ═══════════════════
+local function runDiagnose()
+	if #items == 0 then
+		setStatus("先扫描出音频再诊断", C.warn)
+		return
+	end
+	-- 优先挑一个还没下载成功的
+	local target = nil
+	for _, it in ipairs(items) do
+		if not it.file then
+			target = it
+			break
+		end
+	end
+	target = target or items[1]
+
+	setStatus("正在诊断 " .. target.name .. " …", C.text)
+
+	task.spawn(function()
+		local env = {}
+		table.insert(env, "═══ 下载诊断 ═══")
+		table.insert(env, "目标: " .. target.name .. "  id=" .. target.numId)
+		table.insert(env, "执行器/环境:")
+		table.insert(env, "  request            " .. tostring(type(request) == "function"))
+		table.insert(env, "  http_request       " .. tostring(type(http_request) == "function"))
+		table.insert(env, "  syn.request        " .. tostring(syn ~= nil and type(syn.request) == "function"))
+		table.insert(env, "  http.request       " .. tostring(http ~= nil and type(http.request) == "function"))
+		table.insert(env, "  getcustomasset     " .. tostring(type(getcustomasset) == "function"))
+		table.insert(env, "  writefile          " .. tostring(type(writefile) == "function"))
+		table.insert(env, "  能取到 cookie     " .. tostring(COOKIE ~= nil))
+		table.insert(env, "")
+		table.insert(env, "逐个方法尝试:")
+
+		local data, ext, how, diag = tryAll(target.numId, true)
+		if diag then
+			for i, d in ipairs(diag) do
+				table.insert(env, string.format("  %d) %-26s %s  %s",
+					i, d.method, d.ok and "成功" or "失败", d.note or ""))
+			end
+		end
+		table.insert(env, "")
+		if data then
+			table.insert(env, string.format("结论: 可用方法 = %s，拿到 %d 字节 (%s)", how, #data, ext))
+		else
+			table.insert(env, "结论: 所有方法都失败")
+			table.insert(env, "常见原因:")
+			table.insert(env, "  · 执行器没有带登录态的请求函数 -> 用不了 assetdelivery")
+			table.insert(env, "  · 该音频是受限/付费资产，非所有者无法下载")
+			table.insert(env, "  · 需要 .ROBLOSECURITY，但执行器不提供 getcookie")
+		end
+
+		for _, l in ipairs(env) do
+			print("[诊断] " .. l)
+		end
+
+		local brief = data and ("可用: " .. tostring(how))
+			or ((diag and diag[1] and diag[1].note) or "全部失败")
+		setStatus("诊断完成: " .. tostring(brief) .. "  （完整结果见 F9 控制台）",
+			data and C.ok or C.bad)
+
+		if type(writefile) == "function" then
+			pcall(makefolder, CONFIG.OUT_DIR)
+			pcall(writefile, CONFIG.OUT_DIR .. "/diag.txt", table.concat(env, "\n"))
+		end
+	end)
+end
+
 btnExport.MouseButton1Click:Connect(exportIndex)
+btnDiag.MouseButton1Click:Connect(runDiagnose)
 
 btnPreviewStop.MouseButton1Click:Connect(function()
 	stopPreview()
