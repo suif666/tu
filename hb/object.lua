@@ -17,7 +17,7 @@ if getgenv().__HB_OBJECT_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.HBObjectTab) or getgenv().SutureHBHBObjectTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.HBObjectTab) or getgenv().SutureHBObjectTab
 if not Tab then
 	warn("[控制物体] 未找到页签（主脚本没赋值 getgenv().Tabs.HBObjectTab？）")
 	return
