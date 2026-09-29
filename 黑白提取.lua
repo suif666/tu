@@ -194,82 +194,40 @@ local ctx = {
 }
 
 --==============================================================
--- 分类与页签
--- Boreal 没有 TabGroup/Category，分类靠 win:Section() 建侧栏分组，
--- 分组对象上的 :Tab() 才是真正的页签（这就是 suif.lua 用的做法）。
+-- 版本号（排查用：控制台会打出来，确认跑的是哪一版）
+--==============================================================
+local HB_VERSION = "远程脚本版 v2 · 扁平页签 + 瞬时加载"
+print("[黑白提取] 启动 " .. HB_VERSION)
+
+--==============================================================
+-- 兼容层：getgenv 不一定存在
+--==============================================================
+local GENV = (type(getgenv) == "function") and getgenv() or _G
+
+--==============================================================
+-- 重跑清场
 --
---   视觉类 -> 动作/动画、伪装玩家
---   玩家类 -> 缓慢的快速跑
---   工具类 -> 自动连点器
---   功能类 -> NPC交互、触发类、控制物体
---==============================================================
-
--- ── 视觉类 ──
-local secShijue = win:Section({ Title = "视觉类", Icon = "palette", Opened = true })
-local animTab     = secShijue:Tab({ Title = "动作/动画", Icon = "music", Locked = false })
-local disguiseTab = secShijue:Tab({ Title = "伪装玩家", Icon = "user",  Locked = false })
-
--- ── 玩家类 ──
-local secWanjia = win:Section({ Title = "玩家类", Icon = "user", Opened = true })
-local runTab    = secWanjia:Tab({ Title = "缓慢的快速跑", Icon = "zap", Locked = false })
-
--- ── 工具类 ──
-local secGongju = win:Section({ Title = "工具类", Icon = "wrench", Opened = true })
-local clickerTab = secGongju:Tab({ Title = "自动连点器", Icon = "mouse", Locked = false })
-
--- ── 功能类 ──
-local secGongneng = win:Section({ Title = "功能类", Icon = "folder", Opened = true })
-local npcTab     = secGongneng:Tab({ Title = "NPC交互",  Icon = "server", Locked = false })
-local triggerTab = secGongneng:Tab({ Title = "触发类",   Icon = "zap",    Locked = false })
-local objectTab  = secGongneng:Tab({ Title = "控制物体", Icon = "box",    Locked = false })
-
--- 各页签的归属：
---   动作/动画    <- 动作动画(v1内联) + 动作包 + 动画包 + 解锁所有商城动画
---   伪装玩家     <- 伪装玩家(含服务器人员下拉框)
---   缓慢的快速跑 <- 远程加载 wearedevs 混淆脚本
---   自动连点器 / NPC交互 / 触发类 / 控制物体 <- 各自独立模块
-
---==============================================================
--- 导出给远程脚本用的共享环境
--- 远程脚本是用 loadstring 单独跑的独立 chunk，看不到主脚本的局部变量，
--- 所以这里统一挂到 getgenv() 上，远程脚本按需取用。
--- 这也是 suif.lua 那套远程脚本的做法（getgenv().Tabs.XxxTab）。
---==============================================================
---==============================================================
--- 重跑清场（重要）
---
--- 远程脚本用 getgenv().__HB_XXX_LOADED 防重复加载。如果不在这里清掉，
--- 第二次执行主脚本（不重进游戏）时，远程脚本一进去就看到标志位是 true，
--- 直接 return —— 页签建出来了但里面是空的。
---
--- 另外把上一次留下的窗口和旧页签引用一起清掉，避免多窗口叠加、
--- 以及远程脚本拿到已经被销毁的旧页签对象。
--- 注意：只删 HB_ 开头的键，不动 getgenv().Tabs 里别的脚本的页签。
+-- 远程脚本用 __HB_XXX_LOADED 防重复加载。不清掉的话，第二次执行主脚本
+-- （不重进游戏）时远程脚本会直接 return，页签就是空的。
+-- 只删 HB_ 开头的键，不动 Tabs 里其它脚本的页签。
 --==============================================================
 local HB_KEYS = {
-	{ "Anim",     "HB_AnimTab" },
-	{ "Action",   "HB_AnimTab" },
-	{ "AnimPack", "HB_AnimTab" },
-	{ "Disguise", "HB_DisguiseTab" },
-	{ "SlowRun",  "HB_SlowRunTab" },
-	{ "Clicker",  "HB_ClickerTab" },
-	{ "NPC",      "HB_NPCTab" },
-	{ "Trigger",  "HB_TriggerTab" },
-	{ "Object",   "HB_ObjectTab" },
+	{ "Anim", "HB_AnimTab" }, { "Action", "HB_AnimTab" }, { "AnimPack", "HB_AnimTab" },
+	{ "Disguise", "HB_DisguiseTab" }, { "SlowRun", "HB_SlowRunTab" },
+	{ "Clicker", "HB_ClickerTab" }, { "NPC", "HB_NPCTab" },
+	{ "Trigger", "HB_TriggerTab" }, { "Object", "HB_ObjectTab" },
 }
 
 for _, kv in ipairs(HB_KEYS) do
-	getgenv()["__HB_" .. string.upper(kv[1]) .. "_LOADED"] = nil
+	GENV["__HB_" .. string.upper(kv[1]) .. "_LOADED"] = nil
 end
-
-if getgenv().Tabs then
+if GENV.Tabs then
 	for _, kv in ipairs(HB_KEYS) do
-		getgenv().Tabs[kv[2]] = nil
+		GENV.Tabs[kv[2]] = nil
 	end
 end
-
 do
-	local oldWin = getgenv().HB_win
+	local oldWin = GENV.HB_win
 	if oldWin then
 		pcall(function()
 			oldWin:Destroy()
@@ -278,143 +236,181 @@ do
 			oldWin:Close()
 		end)
 	end
-	getgenv().HB_win = nil
+	GENV.HB_win = nil
 end
 
-getgenv().HB_WindUI   = WindUI
-getgenv().HB_notify   = notify
-getgenv().HB_readInput = readInput
-getgenv().HB_onClose  = onClose
-getgenv().HB_getChar  = getChar
-getgenv().HB_getHum   = getHum
-getgenv().HB_isR15    = isR15
-getgenv().HB_win      = win
+--==============================================================
+-- 建页签
+--
+-- ★ 之前用 win:Section({...}):Tab({...}) 做分类，在你的 Boreal 上会报错
+--   （Boreal 里只有 av.Tab 是真正的页签工厂，av.Section 返回的对象没有 :Tab），
+--   脚本在建页签这一步就中断了 —— 表现就是「什么都没有」。
+--
+--   现在改用已经验证可用的 win:Tab()，分类信息放进页签标题（侧栏一样看得清）。
+--   如果你的 Boreal 版本确实支持 Section 分组，把 USE_SECTIONS 改成 true；
+--   无论哪条路失败都会自动退回扁平页签，不会再让脚本中断。
+--==============================================================
+local USE_SECTIONS = false
 
--- 页签挂到 getgenv().Tabs 上（远程脚本靠这个拿页签）
-getgenv().Tabs = getgenv().Tabs or {}
-getgenv().Tabs.HB_AnimTab     = animTab
-getgenv().Tabs.HB_DisguiseTab = disguiseTab
-getgenv().Tabs.HB_SlowRunTab  = runTab
-getgenv().Tabs.HB_ClickerTab  = clickerTab
-getgenv().Tabs.HB_NPCTab      = npcTab
-getgenv().Tabs.HB_TriggerTab  = triggerTab
-getgenv().Tabs.HB_ObjectTab   = objectTab
+local tabErrors = {}
 
--- 同时给一份 Suture* 别名，方便沿用你原来的命名习惯
-getgenv().SutureHB_AnimTab     = animTab
-getgenv().SutureHB_DisguiseTab = disguiseTab
-getgenv().SutureHB_SlowRunTab  = runTab
-getgenv().SutureHB_ClickerTab  = clickerTab
-getgenv().SutureHB_NPCTab      = npcTab
-getgenv().SutureHB_TriggerTab  = triggerTab
-getgenv().SutureHB_ObjectTab   = objectTab
+local function makeSection(title, icon)
+	if not USE_SECTIONS then
+		return nil
+	end
+	local ok, sec = pcall(function()
+		return win:Section({ Title = title, Icon = icon, Opened = true })
+	end)
+	return ok and sec or nil
+end
+
+local function makeTab(section, title, icon)
+	if section then
+		local ok, t = pcall(function()
+			return section:Tab({ Title = title, Icon = icon, Locked = false })
+		end)
+		if ok and t then
+			return t
+		end
+		table.insert(tabErrors, title .. "（分组页签失败，已退回扁平）")
+	end
+	local ok2, t2 = pcall(function()
+		return win:Tab({ Title = title, Icon = icon, Locked = false })
+	end)
+	if ok2 and t2 then
+		return t2
+	end
+	table.insert(tabErrors, title)
+	warn("[黑白提取] 页签创建失败: " .. tostring(title))
+	return nil
+end
+
+-- ── 视觉类 ──
+local secShijue  = makeSection("视觉类", "palette")
+local animTab     = makeTab(secShijue, "视觉类 · 动作/动画", "music")
+local disguiseTab = makeTab(secShijue, "视觉类 · 伪装玩家", "user")
+
+-- ── 玩家类 ──
+local secWanjia = makeSection("玩家类", "user")
+local runTab    = makeTab(secWanjia, "玩家类 · 缓慢的快速跑", "zap")
+
+-- ── 工具类 ──
+local secGongju  = makeSection("工具类", "wrench")
+local clickerTab = makeTab(secGongju, "工具类 · 自动连点器", "mouse")
+
+-- ── 功能类 ──
+local secGongneng = makeSection("功能类", "folder")
+local npcTab     = makeTab(secGongneng, "功能类 · NPC交互", "server")
+local triggerTab = makeTab(secGongneng, "功能类 · 触发类", "zap")
+local objectTab  = makeTab(secGongneng, "功能类 · 控制物体", "box")
+
+print(string.format(
+	"[黑白提取] 页签: 动作/动画=%s 伪装玩家=%s 缓慢跑=%s 连点器=%s NPC=%s 触发=%s 控制物体=%s",
+	tostring(animTab ~= nil), tostring(disguiseTab ~= nil), tostring(runTab ~= nil),
+	tostring(clickerTab ~= nil), tostring(npcTab ~= nil), tostring(triggerTab ~= nil),
+	tostring(objectTab ~= nil)))
+
+if #tabErrors > 0 then
+	warn("[黑白提取] 有页签创建失败: " .. table.concat(tabErrors, ", "))
+end
 
 --==============================================================
--- 远程脚本登记
--- 主脚本只负责建页签；每个功能都是一个独立远程脚本，
--- 点开对应页签时才去拉取并执行（避免启动时一次性拉 9 个文件卡顿）。
+-- 导出给远程脚本用的共享环境
+-- 远程脚本是 loadstring 单独跑的独立 chunk，看不到主脚本的局部变量，
+-- 所以统一挂到 getgenv()（没有则退到 _G）上，远程脚本按需取用。
+--==============================================================
+GENV.HB_WindUI    = WindUI
+GENV.HB_notify    = notify
+GENV.HB_readInput = readInput
+GENV.HB_onClose   = onClose
+GENV.HB_getChar   = getChar
+GENV.HB_getHum    = getHum
+GENV.HB_isR15     = isR15
+GENV.HB_win       = win
+GENV.HB_version   = HB_VERSION
+
+GENV.Tabs = GENV.Tabs or {}
+GENV.Tabs.HB_AnimTab     = animTab
+GENV.Tabs.HB_DisguiseTab = disguiseTab
+GENV.Tabs.HB_SlowRunTab  = runTab
+GENV.Tabs.HB_ClickerTab  = clickerTab
+GENV.Tabs.HB_NPCTab      = npcTab
+GENV.Tabs.HB_TriggerTab  = triggerTab
+GENV.Tabs.HB_ObjectTab   = objectTab
+
+GENV.SutureHB_AnimTab     = animTab
+GENV.SutureHB_DisguiseTab = disguiseTab
+GENV.SutureHB_SlowRunTab  = runTab
+GENV.SutureHB_ClickerTab  = clickerTab
+GENV.SutureHB_NPCTab      = npcTab
+GENV.SutureHB_TriggerTab  = triggerTab
+GENV.SutureHB_ObjectTab   = objectTab
+
+--==============================================================
+-- 加载 9 个远程脚本
+--
+-- ★ 按你的要求改成「瞬时加载」：窗口建好就立刻依次拉取执行，
+--   不做「点开页签才加载」。之前那版靠挂页签点击事件触发，
+--   一旦挂不上就完全没有反应（表现就是什么都没有）。
 --==============================================================
 local HB_REMOTE_BASE = "https://raw.githubusercontent.com/suif666/tu/main/hb/"
 
--- 拉取并执行一个远程脚本。失败重试 3 次，仍失败就明确提示。
-local function loadRemote(url, desc, onSuccess, onFail)
-	task.spawn(function()
-		local ok, err
-		for attempt = 1, 3 do
-			ok, err = pcall(function()
-				local src = game:HttpGet(url)
-				local fn, compileErr = loadstring(src)
-				if not fn then
-					error(compileErr)
-				end
-				fn()
-			end)
-			if ok then
-				if onSuccess then
-					pcall(onSuccess)
-				end
-				return
+-- 拉取并执行一个远程脚本。失败重试 3 次，返回 ok, err
+local function loadRemote(url, desc)
+	local lastErr
+	for attempt = 1, 3 do
+		local ok, err = pcall(function()
+			local src = game:HttpGet(url)
+			local fn, compileErr = loadstring(src)
+			if not fn then
+				error(compileErr)
 			end
-			task.wait(0.5 * attempt)
-		end
-		warn((desc or "远程脚本") .. " 加载失败: " .. tostring(err))
-		pcall(notify, desc or "远程脚本", "加载失败：" .. tostring(err), "x")
-		if onFail then
-			pcall(onFail)
-		end
-	end)
-end
-
--- 登记表：状态机 pending / loading / done / failed
-local lazyTabs = {}
-local lazyOrder = {}
-
-local function startLoad(item)
-	if item.state == "loading" or item.state == "done" then
-		return
-	end
-	item.state = "loading"
-	loadRemote(item.url, item.desc,
-		function()
-			item.state = "done"
-		end,
-		function()
-			item.state = "failed"
+			fn()
 		end)
-end
-
--- 登记一个页签对应的远程脚本；点击该页签时才加载
-local function lazyLoad(url, desc, tab)
-	if not (tab and tab.Index) then
-		warn("[黑白提取] lazyLoad 拿不到页签: " .. tostring(desc))
-		return
-	end
-	local item = { url = url, desc = desc, state = "pending" }
-	lazyTabs[tab.Index] = item
-	lazyOrder[#lazyOrder + 1] = item
-
-	-- 挂页签的点击事件。普通 Tab 的点击对象是 tab.UIElements.Main，
-	-- TabItem 只有 Dropdown 型 Tab 才用，挂它点不动（suif.lua 里踩过的坑）。
-	task.spawn(function()
-		for _ = 1, 20 do
-			local btn = tab.UIElements and tab.UIElements.Main
-			if btn and btn.MouseButton1Click then
-				pcall(function()
-					btn.MouseButton1Click:Connect(function()
-						if item.state == "pending" or item.state == "failed" then
-							startLoad(item)
-						end
-					end)
-				end)
-				return
-			end
-			task.wait(0.1)
+		if ok then
+			return true
 		end
-		warn("[黑白提取] 挂不上页签点击事件: " .. tostring(desc))
-	end)
+		lastErr = err
+		print(string.format("[黑白提取] %s 第 %d 次失败: %s", tostring(desc), attempt, tostring(err)))
+		task.wait(0.5 * attempt)
+	end
+	return false, lastErr
 end
 
--- ── 各页签对应的远程脚本 ──
-lazyLoad(HB_REMOTE_BASE .. "animation.lua", "动作动画", animTab)
-lazyLoad(HB_REMOTE_BASE .. "actionpack.lua", "动作包", animTab)
-lazyLoad(HB_REMOTE_BASE .. "animpack.lua", "动画包", animTab)
-lazyLoad(HB_REMOTE_BASE .. "disguise.lua", "伪装玩家", disguiseTab)
-lazyLoad(HB_REMOTE_BASE .. "slowrun.lua", "缓慢的快速跑", runTab)
-lazyLoad(HB_REMOTE_BASE .. "clicker.lua", "自动连点器", clickerTab)
-lazyLoad(HB_REMOTE_BASE .. "npc.lua", "NPC交互", npcTab)
-lazyLoad(HB_REMOTE_BASE .. "trigger.lua", "触发类", triggerTab)
-lazyLoad(HB_REMOTE_BASE .. "object.lua", "控制物体", objectTab)
+local HB_MODULES = {
+	{ "animation.lua", "动作动画" },
+	{ "actionpack.lua", "动作包" },
+	{ "animpack.lua", "动画包" },
+	{ "disguise.lua", "伪装玩家" },
+	{ "slowrun.lua", "缓慢的快速跑" },
+	{ "clicker.lua", "自动连点器" },
+	{ "npc.lua", "NPC交互" },
+	{ "trigger.lua", "触发类" },
+	{ "object.lua", "控制物体" },
+}
 
--- 兜底：万一某个页签的点击事件没挂上，3 秒后把这些还没加载的也拉下来，
--- 保证功能一定可用（只是失去了「点了才加载」的省流量效果）。
 task.spawn(function()
-	task.wait(3)
-	for _, item in ipairs(lazyOrder) do
-		if item.state == "pending" then
-			startLoad(item)
-			task.wait(0.4)
+	task.wait(0.2)
+	local okCount, failList = 0, {}
+	for i, m in ipairs(HB_MODULES) do
+		print(string.format("[黑白提取] (%d/%d) 加载 %s ...", i, #HB_MODULES, m[2]))
+		local ok, err = loadRemote(HB_REMOTE_BASE .. m[1], m[2])
+		if ok then
+			okCount = okCount + 1
+		else
+			table.insert(failList, m[2] .. " -> " .. tostring(err))
+		end
+		task.wait(0.15)
+	end
+	print(string.format("[黑白提取] 加载结束: 成功 %d / 共 %d", okCount, #HB_MODULES))
+	if #failList == 0 then
+		pcall(notify, "黑白提取", string.format("功能加载完成 (%d/%d)", okCount, #HB_MODULES), "check")
+	else
+		pcall(notify, "黑白提取", string.format("有 %d 个功能加载失败，详见控制台", #failList), "x")
+		for _, f in ipairs(failList) do
+			warn("[黑白提取] " .. f)
 		end
 	end
 end)
 
-notify("黑白提取", "主脚本已就绪：视觉类 / 玩家类 / 工具类 / 功能类（点开页签自动加载功能）", "check")
+pcall(notify, "黑白提取", "主脚本已启动（" .. tostring(HB_VERSION) .. "），正在加载功能...", "info")
