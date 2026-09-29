@@ -157,39 +157,6 @@ end
 
 --==============================================================
 --==============================================================
-local selectedModel = nil
-local savedPivots = {}
-local selectionBox = nil
-local pickConn = nil
-local lockSelect = false
-local objFlySpeed = 5
-local objFlyConn = nil
-
-local function getSelectionBox()
-	if selectionBox and selectionBox.Parent then
-		return selectionBox
-	end
-	local box = Instance.new("SelectionBox")
-	box.Name = "HB_ObjectSelect"
-	box.LineThickness = 0.05
-	box.Color3 = Color3.fromRGB(0, 200, 255)
-	box.Parent = game:GetService("CoreGui")
-	selectionBox = box
-	return box
-end
-
-local function setSelected(obj)
-	selectedModel = obj
-	getSelectionBox().Adornee = obj
-end
-
-local function copyToClipboard(text)
-	local ok = pcall(function()
-		setclipboard(tostring(text))
-	end)
-	return ok
-end
-
 --==============================================================
 -- 窗口
 --==============================================================
@@ -227,10 +194,124 @@ local ctx = {
 }
 
 --==============================================================
+-- 分类与页签
+-- Boreal 没有 TabGroup/Category，分类靠 win:Section() 建侧栏分组，
+-- 分组对象上的 :Tab() 才是真正的页签（这就是 suif.lua 用的做法）。
+--
+--   视觉类 -> 动作/动画、伪装玩家
+--   玩家类 -> 缓慢的快速跑
+--   工具类 -> 自动连点器
+--   功能类 -> NPC交互、触发类、控制物体
+--==============================================================
+
+-- ── 视觉类 ──
+local secShijue = win:Section({ Title = "视觉类", Icon = "palette", Opened = true })
+local animTab     = secShijue:Tab({ Title = "动作/动画", Icon = "music", Locked = false })
+local disguiseTab = secShijue:Tab({ Title = "伪装玩家", Icon = "user",  Locked = false })
+
+-- ── 玩家类 ──
+local secWanjia = win:Section({ Title = "玩家类", Icon = "user", Opened = true })
+local runTab    = secWanjia:Tab({ Title = "缓慢的快速跑", Icon = "zap", Locked = false })
+
+-- ── 工具类 ──
+local secGongju = win:Section({ Title = "工具类", Icon = "wrench", Opened = true })
+local clickerTab = secGongju:Tab({ Title = "自动连点器", Icon = "mouse", Locked = false })
+
+-- ── 功能类 ──
+local secGongneng = win:Section({ Title = "功能类", Icon = "folder", Opened = true })
+local npcTab     = secGongneng:Tab({ Title = "NPC交互",  Icon = "server", Locked = false })
+local triggerTab = secGongneng:Tab({ Title = "触发类",   Icon = "zap",    Locked = false })
+local objectTab  = secGongneng:Tab({ Title = "控制物体", Icon = "box",    Locked = false })
+
+-- 各页签的归属：
+--   动作/动画    <- 动作动画(v1内联) + 动作包 + 动画包 + 解锁所有商城动画
+--   伪装玩家     <- 伪装玩家(含服务器人员下拉框)
+--   缓慢的快速跑 <- 远程加载 wearedevs 混淆脚本
+--   自动连点器 / NPC交互 / 触发类 / 控制物体 <- 各自独立模块
+
+-- ===== 以下为提取出来的功能模块（自动合并，勿手改） =====
+
+-- ── 动作动画 ──
+local buildAnimBasic = (function()
+--[[
+    黑白提取 · 动作/动画
+    从主脚本的 v1 内联代码搬过来，改成一个接收 tab 的模块。
+
+    内容：自定义动画 / 随机跳舞 / 停止所有动画 / 全局动画速度
+    解锁所有商城动画（原来是远程类页签里的，属于动画功能，挪到这一节）
+    动作包、动画包这两个模块由调用方塞进同一个 tab。
+]]
+return function(tab, ctx)
+	local notify    = ctx.notify
+	local readInput = ctx.readInput
+	local isR15     = ctx.isR15
+	local LP        = game:GetService("Players").LocalPlayer
+	local getHum    = ctx.getHum
+--==============================================================
+-- 动画：播放 / 停止 / 全局速度
+--==============================================================
+local playingTracks = {}
+
+local function stopAllAnim()
+	for _, track in ipairs(playingTracks) do
+		pcall(function()
+			track:Stop()
+		end)
+	end
+	playingTracks = {}
+end
+
+-- 对应黑白的 fn80
+local function playAnim(plr, id, speed, looped, weight)
+	local hum = getHum(plr)
+	if not hum then
+		return nil
+	end
+	stopAllAnim()
+	local anim = Instance.new("Animation")
+	anim.AnimationId = "rbxassetid://" .. tostring(id)
+	local track
+	local ok = pcall(function()
+		track = hum:LoadAnimation(anim)
+	end)
+	if not ok or not track then
+		return nil
+	end
+	track.Looped = looped or false
+	track:Play(weight or 0, 1, 0)
+	track:AdjustSpeed(speed or 1)
+	table.insert(playingTracks, track)
+	return track
+end
+
+-- 对应黑白的 fn77 分支：调整所有正在播放的动画速度
+local function setGlobalAnimSpeed(speed)
+	local hum = getHum(LP)
+	if not hum then
+		return 0
+	end
+	local n = 0
+	for _, track in pairs(hum:GetPlayingAnimationTracks()) do
+		local ok = pcall(function()
+			track:AdjustSpeed(speed)
+		end)
+		if ok then
+			n = n + 1
+		end
+	end
+	-- 本脚本自己播的那几条也一起调
+	for _, track in ipairs(playingTracks) do
+		pcall(function()
+			track:AdjustSpeed(speed)
+		end)
+	end
+	return n
+end
+--==============================================================
 -- [动作/动画类]
 --==============================================================
-local animTab = win:Tab({ Title = "动作/动画", Icon = "music" })
-local animSec = animTab:Section({ Title = "自定义动画", Opened = true })
+
+local animSec = tab:Section({ Title = "自定义动画", Opened = true })
 
 local animIdInput = animSec:Input({
 	Title = "动画 ID",
@@ -270,7 +351,7 @@ animSec:Button({
 	end,
 })
 
-local quickSec = animTab:Section({ Title = "快捷动画", Opened = true })
+local quickSec = tab:Section({ Title = "快捷动画", Opened = true })
 
 local function quickPlay(list, label, looped)
 	local track = playAnim(LP, list[math.random(1, #list)], 1, looped or true, 0)
@@ -311,7 +392,7 @@ quickSec:Button({
 	end,
 })
 
-local speedSec = animTab:Section({ Title = "全局动画速度", Opened = true })
+local speedSec = tab:Section({ Title = "全局动画速度", Opened = true })
 
 speedSec:Slider({
 	Title = "全局动画速度",
@@ -332,201 +413,38 @@ speedSec:Button({
 	end,
 })
 
---==============================================================
--- [玩家类]
---==============================================================
-local playerTab = win:Tab({ Title = "玩家类", Icon = "user" })
+	--==========================================================
+	-- 解锁所有商城动画（原来是「远程类」页签里的一项，按分类挪到动作/动画）
+	-- 上游 MoonSec V3 混淆，约 553 KB，没法提取逻辑，只能原样远程加载
+	--==========================================================
+	local shopSec = tab:Section({ Title = "商城动画（远程）", Opened = false })
 
--- ---- 伪装玩家 ----
-local disguiseSec = playerTab:Section({ Title = "伪装玩家", Opened = true })
+	shopSec:Paragraph({
+		Title = "上游是混淆代码，没法提取逻辑，只能原样远程加载",
+		Desc = "解锁所有商城动画：MoonSec V3 混淆（约 553 KB）",
+		Image = "alert-triangle",
+		ImageSize = 16,
+		Color = Color3.fromRGB(244, 201, 72),
+	})
 
-disguiseSec:Paragraph({
-	Title = "把目标玩家的外观和名字改成另一个 Roblox 账号的样子",
-	Desc = "先填要伪装成的 Roblox 用户名，再填要改的目标玩家名",
-	Image = "info",
-	ImageSize = 16,
-	Color3.fromRGB(72, 72, 72),
-})
-
-local disguiseNameInput = disguiseSec:Input({
-	Title = "伪装成（Roblox 用户名）",
-	Placeholder = "例：Roblox",
-	Value = "",
-})
-
-local disguiseTargetInput = disguiseSec:Input({
-	Title = "目标玩家（当前服务器里的名字）",
-	Placeholder = "例：Player1",
-	Value = "",
-})
-
--- 对应黑白的 fn80（子作用域那个）：按用户名查 userId
-local function lookupUserId(name)
-	local ok, result = pcall(function()
-		return game:HttpGet("https://users.roblox.com/v1/users/search?keyword=" .. HttpService:UrlEncode(name), true)
-	end)
-	if not ok or not result then
-		return nil
-	end
-	local ok2, data = pcall(function()
-		return HttpService:JSONDecode(result)
-	end)
-	if not ok2 or not data or not data.data or #data.data == 0 then
-		return nil
-	end
-	return data.data[1].id, data.data[1].name, data.data[1].displayName
-end
-
--- 对应黑白的 fn81：把目标角色的外观替换掉
-local function applyAppearance(character, userId)
-	local ok, appearance = pcall(function()
-		return Players:GetCharacterAppearanceAsync(userId)
-	end)
-	if not ok or not appearance then
-		return false
-	end
-
-	for _, child in ipairs(character:GetChildren()) do
-		if child:IsA("Accessory") or child:IsA("Shirt") or child:IsA("Pants") or child:IsA("BodyColors") then
-			child:Destroy()
-		end
-	end
-
-	for _, child in ipairs(appearance:GetChildren()) do
-		if child:IsA("Shirt") or child:IsA("Pants") or child:IsA("BodyColors") then
-			child.Parent = character
-		elseif child:IsA("Accessory") then
-			local hum = character:FindFirstChildOfClass("Humanoid")
-			if hum then
-				pcall(function()
-					hum:AddAccessory(child)
-				end)
-			end
-		end
-	end
-
-	local head = character:FindFirstChild("Head")
-	if head then
-		local oldFace = head:FindFirstChild("face")
-		if oldFace then
-			oldFace:Destroy()
-		end
-		local newFace = appearance:FindFirstChild("face")
-		if newFace then
-			newFace.Parent = head
-		else
-			local decal = Instance.new("Decal")
-			decal.Face = Enum.NormalId.Front
-			decal.Name = "face"
-			decal.Texture = "rbxasset://textures/face.png"
-			decal.Transparency = 0
-			decal.Parent = head
-		end
-	end
-
-	-- 强制刷新一次外观
-	local parent = character.Parent
-	character.Parent = nil
-	character.Parent = parent
-	return true
-end
-
-disguiseSec:Button({
-	Title = "伪装目标玩家",
-	Desc = "把目标玩家的外观和名字改成上面那个账号的",
-	Icon = "user-check",
-	Callback = function()
-		local wantName = tostring(readInput(disguiseNameInput) or "")
-		local targetName = tostring(readInput(disguiseTargetInput) or "")
-		if wantName == "" then
-			notify("错误", "请先填要伪装成的用户名", "x")
-			return
-		end
-		if targetName == "" then
-			notify("错误", "请先填目标玩家名", "x")
-			return
-		end
-		local target = Players:FindFirstChild(targetName)
-		if not target then
-			notify("错误", "目标玩家不存在或已离开", "x")
-			return
-		end
-		local character = target.Character
-		if not character or not character:FindFirstChildOfClass("Humanoid") then
-			notify("错误", "目标玩家角色未加载", "x")
-			return
-		end
-
-		local userId, userName, displayName = lookupUserId(wantName)
-		if not userId then
-			notify("错误", "查不到这个用户名", "x")
-			return
-		end
-
-		local ok = applyAppearance(character, userId)
-		if not ok then
-			notify("错误", "获取外观失败", "x")
-			return
-		end
-
-		pcall(function()
-			character.Name = userName
-		end)
-		local hum = character:FindFirstChildOfClass("Humanoid")
-		if hum then
-			pcall(function()
-				hum.DisplayName = displayName
+	shopSec:Button({
+		Title = "解锁所有商城动画",
+		Desc = "远程加载并执行（MoonSec V3 混淆）",
+		Icon = "unlock",
+		Callback = function()
+			local ok, result = pcall(function()
+				return loadstring(game:HttpGet("https://raw.githubusercontent.com/BS58dL/BS/refs/heads/main/%E8%A7%A3%E9%94%81%E6%89%80%E6%9C%89%E5%95%86%E5%9F%8E%E5%8A%A8%E7%94%BB.txt"))()
 			end)
-		end
+			if ok then
+				notify("解锁所有商城动画", "已加载")
+			else
+				notify("错误", "加载失败: " .. tostring(result):sub(1, 60), "x")
+			end
+		end,
+	})
 
-		notify("成功", string.format("已将 %s 的外观改为 %s", targetName, tostring(displayName)), "check")
-	end,
-})
-
---==============================================================
--- [远程类] —— 上游是混淆脚本，这里保留原样远程加载
---==============================================================
-local remoteTab = win:Tab({ Title = "远程类", Icon = "cloud" })
-local remoteSec = remoteTab:Section({ Title = "上游混淆脚本", Opened = true })
-
-remoteSec:Paragraph({
-	Title = "以下两个上游是混淆代码，没法提取逻辑，只能原样远程加载",
-	Desc = "解锁所有商城动画：MoonSec V3 混淆（约 553 KB）\n缓慢的快速跑：wearedevs 混淆（约 172 KB）",
-	Image = "alert-triangle",
-	ImageSize = 16,
-	Color3.fromRGB(244, 201, 72),
-})
-
-local function runRemote(url, label)
-	local ok, result = pcall(function()
-		return loadstring(game:HttpGet(url))()
-	end)
-	if ok then
-		notify(label, "已加载")
-	else
-		notify("错误", label .. " 加载失败: " .. tostring(result):sub(1, 60), "x")
-	end
 end
-
-remoteSec:Button({
-	Title = "解锁所有商城动画",
-	Desc = "远程加载（MoonSec 混淆）",
-	Icon = "unlock",
-	Callback = function()
-		runRemote("https://raw.githubusercontent.com/BS58dL/BS/refs/heads/main/%E8%A7%A3%E9%94%81%E6%89%80%E6%9C%89%E5%95%86%E5%9F%8E%E5%8A%A8%E7%94%BB.txt", "解锁所有商城动画")
-	end,
-})
-
-remoteSec:Button({
-	Title = "缓慢的快速跑",
-	Desc = "远程加载（wearedevs 混淆）",
-	Icon = "zap",
-	Callback = function()
-		runRemote("https://pastebin.com/raw/7fLqezjn", "缓慢的快速跑")
-	end,
-})
-
--- ===== 以下为提取出来的功能模块（自动合并，勿手改） =====
+end)()
 
 -- ── 动作包 ──
 local buildActionPack = (function()
@@ -538,7 +456,7 @@ local buildActionPack = (function()
 -- 与 黑白提取.lua 已实现的「随机跳舞、自定义动画、全局动画速度、停止所有动画」
 -- 重复的部分不在此重复实现，只补动作包独有的逻辑。
 --==============================================================================
-return function(win, ctx)
+return function(tab, ctx)
 	local notify    = ctx.notify      -- function(title, content[, icon])
 	local getChar   = ctx.getChar     -- function(player) -> Character or nil
 	local getHum    = ctx.getHum      -- function(player) -> Humanoid or nil
@@ -546,8 +464,6 @@ return function(win, ctx)
 	local isR15     = ctx.isR15       -- function(player) -> boolean
 	local Players = game:GetService("Players")
 	local LP = Players.LocalPlayer
-
-	local tab = win:Tab({ Title = "动作包", Icon = "music" })
 
 	--==========================================================================
 	-- 通用小工具：把人类身上的动画轨道全部找出来
@@ -1137,7 +1053,7 @@ end)()
 
 -- ── 动画包 ──
 local buildAnimPack = (function()
-return function(win, ctx)
+return function(tab, ctx)
 	local notify    = ctx.notify      -- function(title, content[, icon])
 	local getChar   = ctx.getChar     -- function(player) -> Character or nil
 	local getHum    = ctx.getHum      -- function(player) -> Humanoid or nil
@@ -1146,7 +1062,6 @@ return function(win, ctx)
 	local LP = Players.LocalPlayer
 
 	-- 源 76485：{ key = "Animation", title = "动画包", icon = "user" }
-	local tab = win:Tab({ Title = "动画包", Icon = "user" })
 
 	--==============================================================
 	-- 源 6523：arg.Tabs.Animation:Section({ Title = "动画控制", Opened = true })
@@ -1632,6 +1547,339 @@ return function(win, ctx)
 end
 end)()
 
+-- ── 伪装玩家 ──
+local buildDisguise = (function()
+--[[
+    黑白提取 · 伪装玩家
+    对应源 .tmp/黑白/黑白-MAIN.可运行版.lua 的 fn77（7249-8350 附近）
+
+    源里的做法：
+      fn79  改自己的 DisplayName（显示名）
+      fn80  按用户名查 userId
+      fn81  用 userId 拉外观并套到目标角色上
+
+    这里保留「查用户名 -> 拉外观 -> 套用」这条主线，并按要求新增一个
+    「目标玩家」单项下拉框，直接读取当前服务器里的人员，省得手打名字。
+
+    Boreal 的 Dropdown 没有运行时替换 Values 的方法，所以「刷新」是把
+    下拉框 Destroy 掉再在同一个 Section 里重建（跟 NPC交互 里一样的做法）。
+]]
+
+return function(tab, ctx)
+	local notify = ctx.notify
+	local readInput = ctx.readInput
+
+	local Players = game:GetService("Players")
+	local HttpService = game:GetService("HttpService")
+	local LP = Players.LocalPlayer
+
+	local sec = tab:Section({ Title = "伪装玩家", Opened = true })
+
+	sec:Paragraph({
+		Title = "把目标玩家的外观和名字改成另一个 Roblox 账号的样子",
+		Desc = "从下拉框选目标玩家，再填要伪装成的 Roblox 用户名",
+		Image = "info",
+		ImageSize = 16,
+		Color = Color3.fromRGB(72, 72, 72),
+	})
+
+	--==========================================================
+	-- 服务器人员列表（下拉框 + 重建）
+	--==========================================================
+	local selectedTarget = nil
+
+	local function listPlayerNames()
+		local names = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			table.insert(names, p.Name)
+		end
+		table.sort(names, function(a, b)
+			return a:lower() < b:lower()
+		end)
+		return names
+	end
+
+	local targetDropdown = sec:Dropdown({
+		Title = "目标玩家（当前服务器）",
+		Desc = "从服务器人员里单选一个作为伪装目标",
+		Values = listPlayerNames(),
+		Value = nil,
+		Callback = function(v)
+			selectedTarget = v
+		end,
+	})
+
+	-- Boreal 重建下拉框只有一条路：Destroy 掉旧的，再在同一个 Section 里新建。
+	local function rebuildTargetDropdown()
+		local values = listPlayerNames()
+		local ok = pcall(function()
+			targetDropdown:Destroy()
+		end)
+		if not ok then
+			notify("伪装玩家", "Dropdown:Destroy() 不可用，无法重建（当前 " .. tostring(#values) .. " 人）", "x")
+			return
+		end
+		targetDropdown = sec:Dropdown({
+			Title = "目标玩家（当前服务器）",
+			Desc = "从服务器人员里单选一个作为伪装目标",
+			Values = values,
+			Value = selectedTarget,
+			Callback = function(v)
+				selectedTarget = v
+			end,
+		})
+		notify("伪装玩家", "已刷新人员列表（" .. tostring(#values) .. " 人）")
+	end
+
+	sec:Button({
+		Title = "刷新人员列表",
+		Desc = "重新读取当前服务器里的玩家并重建下拉框",
+		Icon = "refresh-cw",
+		Callback = function()
+			rebuildTargetDropdown()
+		end,
+	})
+
+	-- 玩家进出服务器时，下拉框里的快照就旧了；这里顺手提示一下
+	local joinConn = Players.PlayerAdded:Connect(function()
+		notify("伪装玩家", "有玩家加入，点「刷新人员列表」更新下拉框")
+	end)
+	local leaveConn = Players.PlayerRemoving:Connect(function()
+		notify("伪装玩家", "有玩家离开，点「刷新人员列表」更新下拉框")
+	end)
+
+	sec:Divider()
+
+	--==========================================================
+	-- 要伪装成的账号
+	--==========================================================
+	local disguiseNameInput = sec:Input({
+		Title = "伪装成（Roblox 用户名）",
+		Placeholder = "例：Roblox",
+		Value = "",
+	})
+
+	--==========================================================
+	-- 源 fn80 的等价：按用户名查 userId
+	--==========================================================
+	local function lookupUserId(name)
+		local ok, result = pcall(function()
+			return game:HttpGet("https://users.roblox.com/v1/users/search?keyword=" .. HttpService:UrlEncode(name), true)
+		end)
+		if not ok or not result then
+			return nil
+		end
+		local ok2, data = pcall(function()
+			return HttpService:JSONDecode(result)
+		end)
+		if not ok2 or not data or not data.data or #data.data == 0 then
+			return nil
+		end
+		return data.data[1].id, data.data[1].name, data.data[1].displayName
+	end
+
+	--==========================================================
+	-- 源 fn81 的等价：把目标角色的外观替换掉
+	--==========================================================
+	local function applyAppearance(character, userId)
+		local ok, appearance = pcall(function()
+			return Players:GetCharacterAppearanceAsync(userId)
+		end)
+		if not ok or not appearance then
+			return false
+		end
+
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Accessory") or child:IsA("Shirt") or child:IsA("Pants") or child:IsA("BodyColors") then
+				child:Destroy()
+			end
+		end
+
+		for _, child in ipairs(appearance:GetChildren()) do
+			if child:IsA("Shirt") or child:IsA("Pants") or child:IsA("BodyColors") then
+				child.Parent = character
+			elseif child:IsA("Accessory") then
+				local hum = character:FindFirstChildOfClass("Humanoid")
+				if hum then
+					pcall(function()
+						hum:AddAccessory(child)
+					end)
+				end
+			end
+		end
+
+		local head = character:FindFirstChild("Head")
+		if head then
+			local oldFace = head:FindFirstChild("face")
+			if oldFace then
+				oldFace:Destroy()
+			end
+			local newFace = appearance:FindFirstChild("face")
+			if newFace then
+				newFace.Parent = head
+			else
+				local decal = Instance.new("Decal")
+				decal.Face = Enum.NormalId.Front
+				decal.Name = "face"
+				decal.Texture = "rbxasset://textures/face.png"
+				decal.Transparency = 0
+				decal.Parent = head
+			end
+		end
+
+		-- 强制刷新一次外观
+		local parent = character.Parent
+		character.Parent = nil
+		character.Parent = parent
+		return true
+	end
+
+	--==========================================================
+	-- 执行伪装
+	--==========================================================
+	sec:Button({
+		Title = "伪装目标玩家",
+		Desc = "把下拉框选中的目标玩家，改成上面那个账号的外观和名字",
+		Icon = "user-check",
+		Callback = function()
+			local wantName = tostring(readInput(disguiseNameInput) or "")
+			local targetName = selectedTarget
+
+			if wantName == "" then
+				notify("错误", "请先填要伪装成的用户名", "x")
+				return
+			end
+			if not targetName or targetName == "" then
+				notify("错误", "请先从下拉框选一个目标玩家", "x")
+				return
+			end
+
+			local target = Players:FindFirstChild(targetName)
+			if not target then
+				notify("错误", "目标玩家不存在或已离开", "x")
+				return
+			end
+
+			local character = target.Character
+			if not character or not character:FindFirstChildOfClass("Humanoid") then
+				notify("错误", "目标玩家角色未加载", "x")
+				return
+			end
+
+			local userId, userName, displayName = lookupUserId(wantName)
+			if not userId then
+				notify("错误", "查不到这个用户名: " .. wantName, "x")
+				return
+			end
+
+			local ok = applyAppearance(character, userId)
+			if not ok then
+				notify("错误", "获取外观失败", "x")
+				return
+			end
+
+			pcall(function()
+				character.Name = userName
+			end)
+			local hum = character:FindFirstChildOfClass("Humanoid")
+			if hum then
+				pcall(function()
+					hum.DisplayName = displayName
+				end)
+			end
+
+			notify("成功", string.format("已将 %s 的外观改为 %s", targetName, tostring(displayName)), "check")
+		end,
+	})
+
+	--==========================================================
+	-- 只改自己的显示名（源 fn79，7249 行）
+	--==========================================================
+	sec:Divider()
+
+	local selfNameInput = sec:Input({
+		Title = "改成自己的显示名",
+		Placeholder = "留空则恢复成账号名",
+		Value = "",
+	})
+
+	sec:Button({
+		Title = "应用到自己",
+		Desc = "只改你自己的 DisplayName（只在本机和别人客户端显示层生效）",
+		Icon = "user",
+		Callback = function()
+			local ch = LP.Character
+			local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+			if not hum then
+				notify("错误", "你自己的角色未加载", "x")
+				return
+			end
+			local name = tostring(readInput(selfNameInput) or "")
+			local ok, err = pcall(function()
+				hum.DisplayName = (name == "") and LP.Name or name
+			end)
+			if ok then
+				notify("成功", "已更新显示名", "check")
+			else
+				notify("错误", tostring(err), "x")
+			end
+		end,
+	})
+
+	if ctx.onClose then
+		ctx.onClose(function()
+			if joinConn then
+				joinConn:Disconnect()
+			end
+			if leaveConn then
+				leaveConn:Disconnect()
+			end
+		end)
+	end
+end
+end)()
+
+-- ── 缓慢的快速跑 ──
+local buildSlowRun = (function()
+--[[
+    黑白提取 · 缓慢的快速跑
+    源：远程类页签里的一项（源 5563 行）
+
+    上游 pastebin.com/raw/7fLqezjn 是 wearedevs 混淆过的 176,351 字节，
+    没法提取逻辑，只能原样远程加载。
+]]
+
+return function(tab, ctx)
+	local notify = ctx.notify
+
+	local sec = tab:Section({ Title = "缓慢的快速跑（远程）", Opened = true })
+
+	sec:Paragraph({
+		Title = "上游是混淆代码，没法提取逻辑，只能原样远程加载",
+		Desc = "缓慢的快速跑：wearedevs 混淆（约 172 KB）",
+		Image = "alert-triangle",
+		ImageSize = 16,
+		Color = Color3.fromRGB(244, 201, 72),
+	})
+
+	sec:Button({
+		Title = "加载缓慢的快速跑",
+		Desc = "远程加载并执行（wearedevs 混淆）",
+		Icon = "zap",
+		Callback = function()
+			local ok, result = pcall(function()
+				return loadstring(game:HttpGet("https://pastebin.com/raw/7fLqezjn"))()
+			end)
+			if ok then
+				notify("缓慢的快速跑", "已加载")
+			else
+				notify("错误", "加载失败: " .. tostring(result):sub(1, 60), "x")
+			end
+		end,
+	})
+end
+end)()
+
 -- ── 自动连点器 ──
 local buildAutoClicker = (function()
 --==============================================================
@@ -1644,7 +1892,7 @@ local buildAutoClicker = (function()
 --   启动开关：9036-9047 行（Toggle "GUI 开关"）
 -- 说明：该功能不是 loadstring(game:HttpGet(...))() 远程加载，是完整本地实现。
 --==============================================================
-return function(win, ctx)
+return function(tab, ctx)
 	local notify    = ctx.notify    -- function(title, content[, icon])
 	local readInput = ctx.readInput -- function(element) -> string
 	local Players   = game:GetService("Players")
@@ -1723,7 +1971,6 @@ return function(win, ctx)
 	--==============================================================
 	-- UI 骨架：Tab -> 参数设置 / 启动
 	--==============================================================
-	local tab = win:Tab({ Title = "自动连点器", Icon = "mouse" })
 
 	-- 对应源 8624-8652 行：clicker:Section({Title = "参数设置"}) 里的两个 Input
 	local paramSec = tab:Section({ Title = "参数设置", Opened = true })
@@ -2234,7 +2481,7 @@ local buildNPC = (function()
 --   逻辑闭包：1867-2503 行（tbl6 状态表 1871-1878，工具函数 fn48-fn54 1907-1967，
 --             NPC 功能 fn23-fn46 1969-2502）
 --==============================================================
-return function(win, ctx)
+return function(tab, ctx)
 	local notify = ctx.notify -- function(title, content[, icon])
 	local getChar = ctx.getChar -- function(player) -> Character or nil
 	local readInput = ctx.readInput -- function(element) -> string
@@ -2406,10 +2653,10 @@ return function(win, ctx)
 	--==========================================================
 	-- UI
 	--==========================================================
-	local npcTab = win:Tab({ Title = "NPC交互", Icon = "server" })
+	local myTab = tab   -- 页签由调用方建好（功能类 -> NPC交互）
 
 	-- ---- 源 7756-7764：下拉框版选中 + 传送/拉取/视角/瞄准 ----
-	local pickSec = npcTab:Section({ Title = "选择与传送", Opened = true })
+	local pickSec = myTab:Section({ Title = "选择与传送", Opened = true })
 
 	-- 源 7756：npc:Dropdown({Title="选择NPC", Callback=fn23})
 	-- Boreal 的 Dropdown 没有运行时替换 Values 的方法（源 7757「刷新NPC列表」用的是 SetValues），
@@ -2675,7 +2922,7 @@ return function(win, ctx)
 	})
 
 	-- ---- 源 7766-7780：鼠标点选版（第二套选中状态，对应源 v6）----
-	local clickSec = npcTab:Section({ Title = "点选NPC（高级操作）", Opened = true })
+	local clickSec = myTab:Section({ Title = "点选NPC（高级操作）", Opened = true })
 
 	clickSec:Paragraph({
 		Title = "下面这组操作作用在「鼠标点选的NPC」上",
@@ -3111,7 +3358,7 @@ local buildTrigger = (function()
       5. 源文件里 window:OnClose 的清理逻辑（10013 ~ 10029 行）照搬，关窗注册统一走
          ctx.onClose（由调用方实现，为 nil 时静默跳过）。
 ]]
-return function(win, ctx)
+return function(tab, ctx)
 	local notify    = ctx.notify      -- function(title, content[, icon])
 	local getChar   = ctx.getChar     -- function(player) -> Character or nil
 	local readInput = ctx.readInput   -- function(element) -> string
@@ -3119,8 +3366,6 @@ return function(win, ctx)
 	local Players = game:GetService("Players")
 	local ProximityPromptService = game:GetService("ProximityPromptService")
 	local LP = Players.LocalPlayer
-
-	local tab = win:Tab({ Title = "触发类", Icon = "zap" })
 
 	--==========================================================
 	-- 0. 执行器能力检测
@@ -4611,7 +4856,7 @@ local buildObjectCtrl = (function()
                             放大物体 / 缩小物体 / 随机颜色
 ]]
 
-return function(win, ctx)
+return function(tab, ctx)
 	local notify = ctx.notify       -- function(title, content[, icon])
 	local getChar = ctx.getChar     -- function(player) -> Character or nil
 	local readInput = ctx.readInput -- function(element) -> string
@@ -4620,8 +4865,6 @@ return function(win, ctx)
 	local RunService = game:GetService("RunService")
 	local CoreGui = game:GetService("CoreGui")
 	local LP = Players.LocalPlayer
-
-	local tab = win:Tab({ Title = "控制物体", Icon = "box" })
 
 	--==========================================================
 	-- 状态（对应源 8358-8364 的 connection / connection2 / flag3-flag6 / model / highlight / n）
@@ -5123,8 +5366,8 @@ end)()
 
 -- 每个模块都单独 pcall：某一节出错只弹一条通知，不会连累后面的页签
 -- （之前 Color = "Yellow" 那种错误会直接中断整个脚本，导致后面的页签全都不出现）
-local function loadModule(name, fn)
-	local ok, err = pcall(fn, win, ctx)
+local function loadModule(name, fn, tab)
+	local ok, err = pcall(fn, tab, ctx)
 	if not ok then
 		pcall(notify, "模块加载失败", name .. "：" .. tostring(err), "x")
 		print(string.format("[黑白提取] 模块 %s 加载失败: %s", name, tostring(err)))
@@ -5132,11 +5375,14 @@ local function loadModule(name, fn)
 	return ok
 end
 
-loadModule("动作包", buildActionPack)
-loadModule("动画包", buildAnimPack)
-loadModule("自动连点器", buildAutoClicker)
-loadModule("NPC交互", buildNPC)
-loadModule("触发类", buildTrigger)
-loadModule("控制物体", buildObjectCtrl)
+loadModule("动作动画", buildAnimBasic, animTab)
+loadModule("动作包", buildActionPack, animTab)
+loadModule("动画包", buildAnimPack, animTab)
+loadModule("伪装玩家", buildDisguise, disguiseTab)
+loadModule("缓慢的快速跑", buildSlowRun, runTab)
+loadModule("自动连点器", buildAutoClicker, clickerTab)
+loadModule("NPC交互", buildNPC, npcTab)
+loadModule("触发类", buildTrigger, triggerTab)
+loadModule("控制物体", buildObjectCtrl, objectTab)
 
-notify("黑白提取", "已加载（动作包 / 动画包 / 自动连点器 / NPC交互 / 触发类）", "check")
+notify("黑白提取", "已加载 9 节：视觉类(动作/动画·伪装玩家) 玩家类(缓慢的快速跑) 工具类(自动连点器) 功能类(NPC交互·触发类·控制物体)", "check")
