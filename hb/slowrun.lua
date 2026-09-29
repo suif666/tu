@@ -89,4 +89,7 @@ if not ok then
 	warn("[缓慢的快速跑] 构建失败: " .. tostring(err))
 	pcall(notify, "缓慢的快速跑", "构建失败: " .. tostring(err), "x")
 	getgenv().__HB_SLOWRUN_LOADED = nil   -- 清掉标志位，允许再点一次重试
+else
+	-- 成功也打一条到控制台，方便排查「页签是空的」这类问题
+	print("[黑白提取] 远程模块已加载: 缓慢的快速跑 (" .. tostring(#Tab.Elements or 0) .. " 个元素)")
 end
