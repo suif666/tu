@@ -4,7 +4,7 @@
 
     第一批（小件）：
       动作/动画类  自定义动画 / 全局动画速度 / 停止所有动画
-      玩家类       伪装玩家 / 控制物体
+      玩家类       伪装玩家
       远程类       解锁所有商城动画 / 缓慢的快速跑
 
     UI：WindUI-Boreal（suif666/suif）
@@ -156,7 +156,6 @@ local function setGlobalAnimSpeed(speed)
 end
 
 --==============================================================
--- 控制物体
 --==============================================================
 local selectedModel = nil
 local savedPivots = {}
@@ -481,189 +480,6 @@ disguiseSec:Button({
 		end
 
 		notify("成功", string.format("已将 %s 的外观改为 %s", targetName, tostring(displayName)), "check")
-	end,
-})
-
--- ---- 控制物体 ----
-local objectSec = playerTab:Section({ Title = "控制物体", Opened = true })
-
-objectSec:Toggle({
-	Title = "点击选择物体",
-	Desc = "开启后鼠标左键点击场景物体即可选中",
-	Value = false,
-	Callback = function(on)
-		if pickConn then
-			pickConn:Disconnect()
-			pickConn = nil
-		end
-		if not on then
-			return
-		end
-		pickConn = LP:GetMouse().Button1Down:Connect(function()
-			if lockSelect then
-				return
-			end
-			local target = LP:GetMouse().Target
-			if target then
-				setSelected(target:FindFirstAncestorOfClass("Model") or target)
-				notify("物体控制", "已选中: " .. tostring(selectedModel and selectedModel.Name))
-			end
-		end)
-	end,
-})
-
-objectSec:Toggle({
-	Title = "锁定选择",
-	Desc = "锁定后点击不会改变已选中的物体",
-	Value = false,
-	Callback = function(on)
-		lockSelect = on
-	end,
-})
-
-objectSec:Button({
-	Title = "复制选中物体名称",
-	Icon = "clipboard",
-	Callback = function()
-		if not selectedModel then
-			notify("错误", "还没选中物体", "x")
-			return
-		end
-		if copyToClipboard(selectedModel.Name) then
-			notify("物体控制", "已复制名称: " .. selectedModel.Name)
-		else
-			notify("错误", "当前环境不支持剪贴板", "x")
-		end
-	end,
-})
-
-objectSec:Button({
-	Title = "保存位置",
-	Icon = "save",
-	Callback = function()
-		if not selectedModel then
-			notify("错误", "还没选中物体", "x")
-			return
-		end
-		savedPivots[selectedModel] = selectedModel:GetPivot()
-		notify("物体控制", "已保存位置")
-	end,
-})
-
-objectSec:Button({
-	Title = "加载位置",
-	Icon = "rotate-ccw",
-	Callback = function()
-		if not selectedModel then
-			notify("错误", "还没选中物体", "x")
-			return
-		end
-		local pivot = savedPivots[selectedModel]
-		if not pivot then
-			notify("错误", "这个物体还没保存过位置", "x")
-			return
-		end
-		pcall(function()
-			selectedModel:PivotTo(pivot)
-		end)
-		notify("物体控制", "已回到保存的位置")
-	end,
-})
-
-objectSec:Button({
-	Title = "传送到物品",
-	Icon = "navigation",
-	Callback = function()
-		if not selectedModel then
-			notify("错误", "还没选中物体", "x")
-			return
-		end
-		local character = getChar(LP)
-		if not character then
-			return
-		end
-		local basePart = selectedModel:IsA("BasePart") and selectedModel
-			or selectedModel:FindFirstChildWhichIsA("BasePart")
-		if not basePart then
-			notify("错误", "这个物体里没有可用部件", "x")
-			return
-		end
-		pcall(function()
-			character:PivotTo(basePart.CFrame + Vector3.new(0, 3, 0))
-		end)
-		notify("物体控制", "已传送到 " .. selectedModel.Name)
-	end,
-})
-
-objectSec:Button({
-	Title = "传送物品到玩家",
-	Icon = "move",
-	Callback = function()
-		if not selectedModel then
-			notify("错误", "还没选中物体", "x")
-			return
-		end
-		local character = getChar(LP)
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if not root then
-			return
-		end
-		local target = root.CFrame + root.CFrame.LookVector * 5
-		local ok = pcall(function()
-			if selectedModel:IsA("BasePart") then
-				selectedModel.CFrame = target
-			else
-				selectedModel:PivotTo(target)
-			end
-		end)
-		if ok then
-			notify("物体控制", "已把物体拉到面前")
-		else
-			notify("错误", "移动失败", "x")
-		end
-	end,
-})
-
-objectSec:Toggle({
-	Title = "物体飞行",
-	Desc = "让选中的物体跟着鼠标跑",
-	Value = false,
-	Callback = function(on)
-		if objFlyConn then
-			objFlyConn:Disconnect()
-			objFlyConn = nil
-		end
-		if not on then
-			return
-		end
-		objFlyConn = RunService.RenderStepped:Connect(function()
-			if not selectedModel then
-				return
-			end
-			local mouse = LP:GetMouse()
-			if not mouse.Hit then
-				return
-			end
-			pcall(function()
-				if selectedModel:IsA("BasePart") then
-					selectedModel.CFrame = selectedModel.CFrame:Lerp(mouse.Hit + Vector3.new(0, 3, 0), 0.2)
-				else
-					selectedModel:PivotTo(selectedModel:GetPivot():Lerp(mouse.Hit + Vector3.new(0, 3, 0), 0.2))
-				end
-			end)
-		end)
-	end,
-})
-
-objectSec:Input({
-	Title = "飞行速度",
-	Placeholder = "数值",
-	Value = "5",
-	Callback = function(v)
-		local n = tonumber(v)
-		if n then
-			objFlySpeed = n
-		end
 	end,
 })
 
@@ -4775,6 +4591,534 @@ return function(win, ctx)
 end
 end)()
 
+-- ── 控制物体 ──
+local buildObjectCtrl = (function()
+--[[
+    黑白提取 · 控制物体（ObjectCtrl）
+    对应源文件 .tmp/黑白/黑白-MAIN.可运行版.lua 的 fn84，第 8353-8625 行
+
+    源里有三个文件级共享帮助函数，用法很明确，这里各自用等价实现代替：
+      fn14()          取一个高亮/选择框装饰器      -> 本文件 getSelectionBox()
+      fn15(model, cb) 对目标及其所有部件逐个应用   -> 本文件 forEachPart()
+      fn16()          物体飞行的鼠标跟随循环       -> 本文件物体飞行那条 RenderStepped
+
+    板块对应：
+      源 8361  基础选择   -> 点击选择物体
+      源 8390  基础控制   -> 锁定选择 / 复制物体名称 / 启用物体控制 / 物体飞行 /
+                            飞行速度 / 保存位置 / 加载位置 / 传送到物品 /
+                            传送物品到玩家 / 复制物品 / 删除物品
+      源 8528  视觉与物理 -> 物体透明化 / 禁用碰撞 / 固定物体 / 启用反射 /
+                            放大物体 / 缩小物体 / 随机颜色
+]]
+
+return function(win, ctx)
+	local notify = ctx.notify       -- function(title, content[, icon])
+	local getChar = ctx.getChar     -- function(player) -> Character or nil
+	local readInput = ctx.readInput -- function(element) -> string
+
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local CoreGui = game:GetService("CoreGui")
+	local LP = Players.LocalPlayer
+
+	local tab = win:Tab({ Title = "控制物体", Icon = "box" })
+
+	--==========================================================
+	-- 状态（对应源 8358-8364 的 connection / connection2 / flag3-flag6 / model / highlight / n）
+	--==========================================================
+	local model = nil          -- 当前选中的物体
+	local savedPivots = {}     -- 保存的位置（源 tbl5）
+	local selectionBox = nil   -- 选择框（代替源 fn14 的装饰器）
+	local pickConn = nil       -- 「点击选择物体」的鼠标连接（源 connection2）
+	local flyConn = nil        -- 「物体飞行」的循环连接（源 connection）
+	local lockSelect = false   -- 源 flag6
+	local objCtrlEnabled = false -- 源 flag3
+	local flySpeed = 5         -- 源 n
+
+	local function tip(msg, icon)
+		notify("控制物体", msg, icon)
+	end
+
+	--==========================================================
+	-- fn14 等价：选择框
+	--==========================================================
+	local function getSelectionBox()
+		if selectionBox and selectionBox.Parent then
+			return selectionBox
+		end
+		local box = Instance.new("SelectionBox")
+		box.Name = "HB_ObjectSelect"
+		box.LineThickness = 0.05
+		box.Color3 = Color3.fromRGB(0, 200, 255)
+		box.SurfaceTransparency = 1
+		local ok = pcall(function()
+			box.Parent = CoreGui
+		end)
+		if not ok or not box.Parent then
+			box.Parent = LP:WaitForChild("PlayerGui")
+		end
+		selectionBox = box
+		return box
+	end
+
+	local function setAdornee(obj)
+		getSelectionBox().Adornee = obj
+	end
+
+	-- 选中的物体会被销毁/移出场景时，把引用清掉
+	local function isAlive(obj)
+		return obj ~= nil and obj.Parent ~= nil
+	end
+
+	--==========================================================
+	-- fn15 等价：对目标本身 + 它的所有后代里的 BasePart 逐个应用
+	-- 源 fn15 就是把模型下的部件全遍历一遍（含模型本身就是 BasePart 的情况）
+	--==========================================================
+	local function forEachPart(target, fn)
+		if not target then
+			return 0
+		end
+		local n = 0
+		local function apply(part)
+			if part and part:IsA("BasePart") then
+				local ok = pcall(fn, part)
+				if ok then
+					n = n + 1
+				end
+			end
+		end
+		apply(target)
+		if target:IsA("Model") or target:IsA("Folder") then
+			for _, d in ipairs(target:GetDescendants()) do
+				apply(d)
+			end
+		end
+		return n
+	end
+
+	-- 取目标里第一个可用部件（传送、飞行用）
+	local function firstPart(target)
+		if not target then
+			return nil
+		end
+		if target:IsA("BasePart") then
+			return target
+		end
+		return target:FindFirstChildWhichIsA("BasePart")
+	end
+
+	--==========================================================
+	-- 基础选择（源 8361-8388）
+	--==========================================================
+	local pickSec = tab:Section({ Title = "基础选择", Opened = true })
+
+	pickSec:Toggle({
+		Title = "点击选择物体",
+		Desc = "开启后鼠标左键点击场景里的物体即可选中",
+		Value = false,
+		Callback = function(on)
+			if pickConn then
+				pickConn:Disconnect()
+				pickConn = nil
+			end
+			if not on then
+				return
+			end
+			pickConn = LP:GetMouse().Button1Down:Connect(function()
+				if lockSelect then
+					return
+				end
+				local target = LP:GetMouse().Target
+				if not target then
+					return
+				end
+				model = target:FindFirstAncestorOfClass("Model") or target
+				setAdornee(model)
+				tip("已选中: " .. tostring(model.Name))
+			end)
+		end,
+	})
+
+	--==========================================================
+	-- 基础控制（源 8390-8526）
+	--==========================================================
+	local ctrlSec = tab:Section({ Title = "基础控制", Opened = true })
+
+	-- 源 8392 锁定选择
+	ctrlSec:Toggle({
+		Title = "锁定选择",
+		Desc = "锁定后点击不会改变已选中的物体",
+		Value = false,
+		Callback = function(on)
+			lockSelect = on
+		end,
+	})
+
+	-- 源 8401 复制物体名称
+	ctrlSec:Button({
+		Title = "复制物体名称",
+		Icon = "clipboard",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			local ok = pcall(function()
+				setclipboard(tostring(model.Name))
+			end)
+			if ok then
+				tip("已复制名称: " .. tostring(model.Name))
+			else
+				tip("当前环境不支持剪贴板", "x")
+			end
+		end,
+	})
+
+	-- 源 8411 启用物体控制
+	-- 源里 flag3 只用来在关闭时把选择框 Adornee 置空，这里保留同样语义
+	ctrlSec:Toggle({
+		Title = "启用物体控制",
+		Desc = "允许修改选中物体的属性（关闭会取消选择框）",
+		Value = false,
+		Callback = function(on)
+			objCtrlEnabled = on
+			if not on then
+				setAdornee(nil)
+			elseif model then
+				setAdornee(model)
+			end
+		end,
+	})
+
+	-- 源 8424 物体飞行
+	-- 源用 flag4 + connection（fn16 里建 RenderStepped）。这里合成一个可关的连接。
+	ctrlSec:Toggle({
+		Title = "物体飞行",
+		Desc = "让选中的物体跟着鼠标位置飞",
+		Value = false,
+		Callback = function(on)
+			if flyConn then
+				flyConn:Disconnect()
+				flyConn = nil
+			end
+			if not on then
+				return
+			end
+			if not model then
+				tip("请先选中物体", "x")
+				return
+			end
+			flyConn = RunService.RenderStepped:Connect(function()
+				if not isAlive(model) then
+					return
+				end
+				local mouse = LP:GetMouse()
+				if not mouse or not mouse.Hit then
+					return
+				end
+				local target = mouse.Hit + Vector3.new(0, 3, 0)
+				local step = math.clamp((flySpeed or 5) / 100, 0.02, 0.8)
+				pcall(function()
+					if model:IsA("BasePart") then
+						model.CFrame = model.CFrame:Lerp(target, step)
+					else
+						model:PivotTo(model:GetPivot():Lerp(target, step))
+					end
+				end)
+			end)
+		end,
+	})
+
+	-- 源 8440 飞行速度
+	local flySpeedInput
+	flySpeedInput = ctrlSec:Input({
+		Title = "飞行速度",
+		Placeholder = "数值",
+		Value = "5",
+		Callback = function(v)
+			local n = tonumber(v) or tonumber(readInput(flySpeedInput))
+			if n and n > 0 then
+				flySpeed = n
+			end
+		end,
+	})
+
+	-- 源 8453 保存位置
+	ctrlSec:Button({
+		Title = "保存位置",
+		Icon = "save",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			savedPivots[model] = model:GetPivot()
+			tip("已保存位置")
+		end,
+	})
+
+	-- 源 8463 加载位置
+	ctrlSec:Button({
+		Title = "加载位置",
+		Icon = "rotate-ccw",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			local pivot = savedPivots[model]
+			if not pivot then
+				tip("这个物体还没保存过位置", "x")
+				return
+			end
+			local ok = pcall(function()
+				model:PivotTo(pivot)
+			end)
+			if ok then
+				tip("已回到保存的位置")
+			end
+		end,
+	})
+
+	-- 源 8472 传送到物品
+	ctrlSec:Button({
+		Title = "传送到物品",
+		Icon = "navigation",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			local ch = getChar(LP)
+			local part = firstPart(model)
+			if not ch or not part then
+				tip("没有可用部件", "x")
+				return
+			end
+			pcall(function()
+				ch:PivotTo(part.CFrame + Vector3.new(0, 3, 0))
+			end)
+			tip("已传送到 " .. tostring(model.Name))
+		end,
+	})
+
+	-- 源 8487 传送物品到玩家
+	ctrlSec:Button({
+		Title = "传送物品到玩家",
+		Icon = "move",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			local ch = getChar(LP)
+			local root = ch and ch:FindFirstChild("HumanoidRootPart")
+			if not root then
+				return
+			end
+			local target = root.CFrame + root.CFrame.LookVector * 5
+			local ok = pcall(function()
+				if model:IsA("BasePart") then
+					model.CFrame = target
+				else
+					model:PivotTo(target)
+				end
+			end)
+			if ok then
+				tip("已把物体拉到面前")
+			else
+				tip("移动失败", "x")
+			end
+		end,
+	})
+
+	-- 源 8505 复制物品
+	-- 源里复制出来的克隆会替代原物体成为新的选中目标，这里保持一致
+	ctrlSec:Button({
+		Title = "复制物品",
+		Icon = "copy",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			local ok, clone = pcall(function()
+				return model:Clone()
+			end)
+			if not ok or not clone then
+				tip("复制失败（该物体可能受保护）", "x")
+				return
+			end
+			clone.Parent = workspace
+			model = clone
+			setAdornee(clone)
+			tip("已复制并选中副本")
+		end,
+	})
+
+	-- 源 8517 删除物品
+	-- 注意：这是本地删除，只在你自己屏幕上消失，不是服务端删除
+	ctrlSec:Button({
+		Title = "删除物品",
+		Desc = "本地删除（只在你屏幕上消失）",
+		Icon = "trash",
+		Callback = function()
+			if not model then
+				tip("还没选中物体", "x")
+				return
+			end
+			local name = tostring(model.Name)
+			savedPivots[model] = nil
+			pcall(function()
+				model:Destroy()
+			end)
+			model = nil
+			setAdornee(nil)
+			tip("已删除: " .. name)
+		end,
+	})
+
+	--==========================================================
+	-- 视觉与物理（源 8528-8595）
+	--==========================================================
+	local visSec = tab:Section({ Title = "视觉与物理", Opened = true })
+
+	-- 源 8530 物体透明化
+	visSec:Toggle({
+		Title = "物体透明化",
+		Desc = "把选中物体及其部件设为半透明",
+		Value = false,
+		Callback = function(on)
+			local n = forEachPart(model, function(part)
+				part.Transparency = on and 0.5 or 0
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			end
+		end,
+	})
+
+	-- 源 8540 禁用碰撞
+	visSec:Toggle({
+		Title = "禁用碰撞",
+		Desc = "关闭选中物体的 CanCollide",
+		Value = false,
+		Callback = function(on)
+			local n = forEachPart(model, function(part)
+				part.CanCollide = not on
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			end
+		end,
+	})
+
+	-- 源 8550 固定物体
+	visSec:Toggle({
+		Title = "固定物体",
+		Desc = "把选中物体锚定在空中",
+		Value = false,
+		Callback = function(on)
+			local n = forEachPart(model, function(part)
+				part.Anchored = on
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			end
+		end,
+	})
+
+	-- 源 8560 启用反射
+	visSec:Toggle({
+		Title = "启用反射",
+		Desc = "把选中物体的 Reflectance 设为 0.5",
+		Value = false,
+		Callback = function(on)
+			local n = forEachPart(model, function(part)
+				part.Reflectance = on and 0.5 or 0
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			end
+		end,
+	})
+
+	-- 源 8570 放大物体
+	visSec:Button({
+		Title = "放大物体",
+		Desc = "尺寸 ×1.2",
+		Icon = "maximize",
+		Callback = function()
+			local n = forEachPart(model, function(part)
+				part.Size = part.Size * 1.2
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			else
+				tip(string.format("已放大 %d 个部件", n))
+			end
+		end,
+	})
+
+	-- 源 8579 缩小物体
+	visSec:Button({
+		Title = "缩小物体",
+		Desc = "尺寸 ×0.8",
+		Icon = "minimize",
+		Callback = function()
+			local n = forEachPart(model, function(part)
+				part.Size = part.Size * 0.8
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			else
+				tip(string.format("已缩小 %d 个部件", n))
+			end
+		end,
+	})
+
+	-- 源 8588 随机颜色
+	visSec:Button({
+		Title = "随机颜色",
+		Desc = "给选中物体随机上色",
+		Icon = "palette",
+		Callback = function()
+			local n = forEachPart(model, function(part)
+				part.BrickColor = BrickColor.random()
+			end)
+			if n == 0 then
+				tip("还没选中物体", "x")
+			else
+				tip(string.format("已给 %d 个部件随机上色", n))
+			end
+		end,
+	})
+
+	--==========================================================
+	-- 关闭清理（源 8597-8625 的 window:OnClose，但源里那几行写的是
+	-- (nil):Disconnect()，那是反混淆后的残留，实际是断上面那几个连接）
+	--==========================================================
+	if ctx.onClose then
+		ctx.onClose(function()
+			if pickConn then
+				pickConn:Disconnect()
+				pickConn = nil
+			end
+			if flyConn then
+				flyConn:Disconnect()
+				flyConn = nil
+			end
+			if selectionBox then
+				pcall(function()
+					selectionBox:Destroy()
+				end)
+				selectionBox = nil
+			end
+		end)
+	end
+end
+end)()
+
 -- 统一实例化各模块
 
 -- 每个模块都单独 pcall：某一节出错只弹一条通知，不会连累后面的页签
@@ -4793,5 +5137,6 @@ loadModule("动画包", buildAnimPack)
 loadModule("自动连点器", buildAutoClicker)
 loadModule("NPC交互", buildNPC)
 loadModule("触发类", buildTrigger)
+loadModule("控制物体", buildObjectCtrl)
 
 notify("黑白提取", "已加载（动作包 / 动画包 / 自动连点器 / NPC交互 / 触发类）", "check")
