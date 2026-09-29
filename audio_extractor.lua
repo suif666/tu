@@ -315,8 +315,9 @@ local function downloadAudio(assetId)
 end
 
 -- ═══════════════════ 状态 ═══════════════════
-local items = {}          -- 扫描结果
-local itemById = {}       -- AssetId -> item（去重、复用文件）
+local items = {}          -- 扫描结果（每个 AssetId 一条）
+local allSounds = {}      -- 所有 Sound 实例，含共用同一 AssetId 的那些
+                          -- 静音必须用这份，用 items 会漏掉重复 ID 的对象
 local selected = {}       -- item -> true
 local previewSound = nil
 local previewItem = nil
@@ -361,6 +362,7 @@ local function scanAsync(onProgress, onDone)
 					seenInst[child] = true
 					visited = visited + 1
 					if child:IsA("Sound") then
+						table.insert(allSounds, child)
 						local it = makeItem(child)
 						if it then
 							-- 同一 AssetId 只保留一条（记录引用数）
@@ -606,15 +608,22 @@ local btnScan, btnSelAll, btnSelNone = barBtns[1], barBtns[2], barBtns[3]
 local btnDownload, btnStop = barBtns[4], barBtns[5]
 local btnExport, btnDiag = barBtns[6], barBtns[7]
 
--- 搜索框单独一行，占满宽度
+-- 搜索框 + 静音开关
+local btnMute
 local bar2 = Instance.new("Frame")
 bar2.Size = UDim2.new(1, -24, 0, 26)
 bar2.Position = UDim2.new(0, 12, 0, 74)
 bar2.BackgroundTransparency = 1
 bar2.Parent = win
 
+-- 静音开关（事件在文件末尾绑定，那时 muteGame 才在作用域内）
+btnMute = mkButton(bar2, "静音游戏", 72, C.accent)
+btnMute.Size = UDim2.new(0, 72, 1, 0)
+btnMute.Position = UDim2.new(1, -72, 0, 0)
+btnMute.TextSize = 11
+
 local searchBox = Instance.new("TextBox")
-searchBox.Size = UDim2.new(1, 0, 1, 0)
+searchBox.Size = UDim2.new(1, -78, 1, 0)
 searchBox.Position = UDim2.new(0, 0, 0, 0)
 searchBox.BackgroundColor3 = C.panel2
 searchBox.Text = ""
@@ -797,7 +806,93 @@ end
 -- false 表示是游戏原本的对象，只能断开引用，绝不能销毁。
 local previewOwned = false
 
-local function stopPreview()
+-- ═══ 试听时把游戏声音全部静音 ═══
+-- 做法：遍历所有 Sound 把 Volume 记下来再置 0，试听结束原样写回。
+-- 不用暂停（Pause）而只是静音，是为了停止试听时能接着放，不打断游戏节奏。
+local muteEnabled = true          -- 界面上可切换
+local mutedState = nil            -- { [Sound] = 原音量 }，非 nil 表示当前处于静音状态
+local muteHook = nil              -- 静音期间新增的 Sound 也要一起静音
+
+local PREVIEW_NAME = "HB_Preview"
+
+local function muteGame(exceptSound)
+	if mutedState then return end          -- 已经静音了
+	if not muteEnabled then return end
+
+	-- 用 allSounds（所有实例），不能用 items —— items 每个 AssetId 只留一条，
+	-- 共用同一 ID 的其它 Sound 会漏掉，导致它们继续出声
+	local list = {}
+	for _, o in ipairs(allSounds) do
+		if o and o.Parent then
+			table.insert(list, o)
+		end
+	end
+	-- 还没扫描过就兜底遍历一次
+	if #list == 0 then
+		local ok, desc = pcall(function()
+			return game:GetDescendants()
+		end)
+		if ok and desc then
+			for _, d in ipairs(desc) do
+				local isS = pcall(function() return d:IsA("Sound") end)
+				if isS then table.insert(list, d) end
+			end
+		end
+	end
+
+	mutedState = {}
+	for _, snd in ipairs(list) do
+		-- 试听目标本身不能静音，否则就听不见了
+		if snd ~= exceptSound and snd.Name ~= PREVIEW_NAME then
+			local ok, vol = pcall(function() return snd.Volume end)
+			if ok and type(vol) == "number" then
+				mutedState[snd] = vol
+				pcall(function() snd.Volume = 0 end)
+			end
+		end
+	end
+
+	-- 试听期间游戏新加的声音也一起静音
+	local okHook, hook = pcall(function()
+		return game.DescendantAdded:Connect(function(d)
+			if not mutedState then return end
+			local okS, isS = pcall(function() return d:IsA("Sound") end)
+			if not okS or not isS then return end
+			if d.Name == PREVIEW_NAME then return end
+			local okV, vol = pcall(function() return d.Volume end)
+			if okV and type(vol) == "number" then
+				mutedState[d] = vol
+				pcall(function() d.Volume = 0 end)
+			end
+		end)
+	end)
+	if okHook then
+		muteHook = hook
+	end
+end
+
+local function unmuteGame()
+	if muteHook then
+		pcall(function() muteHook:Disconnect() end)
+		muteHook = nil
+	end
+	if not mutedState then return end
+	local count = 0
+	for snd, vol in pairs(mutedState) do
+		-- 期间被销毁的对象跳过；Parent 为 nil 的也不再管
+		local ok = pcall(function()
+			if snd and snd.Parent then
+				snd.Volume = vol
+			end
+		end)
+		if ok then count = count + 1 end
+	end
+	mutedState = nil
+	return count
+end
+
+-- skipUnmute: playPreview 内部切换试听时用，避免游戏声音闪一下
+local function stopPreview(skipUnmute)
 	if previewSound and previewOwned then
 		pcall(function()
 			previewSound:Stop()
@@ -809,22 +904,32 @@ local function stopPreview()
 	previewItem = nil
 	btnPreviewStop.Visible = false
 	previewLabel.Text = "试听: 无"
+	if not skipUnmute then
+		unmuteGame()
+	end
 end
 
 local function playPreview(item)
-	stopPreview()
+	stopPreview(true)
+
+	-- 情况一：游戏里正在放这个音频。直接借用它的播放状态，不新建也不动它，
+	-- 而且静音时要把它排除掉，否则等于把自己也静音了。
 	if item.playing and item.obj and item.obj.Parent then
-		-- 游戏内正在播放的原声，直接用它的播放状态，不要新建也不要动它
 		previewSound = item.obj
 		previewOwned = false
 		previewItem = item
+		muteGame(item.obj)
 		previewLabel.Text = "试听: " .. item.name .. "（游戏内正在播放）"
+			.. (mutedState and "  [游戏已静音]" or "")
 		btnPreviewStop.Visible = true
 		return
 	end
 
+	-- 先把游戏静音，再建自己的试听 Sound（建的时候 muteHook 会按名字跳过它）
+	muteGame(nil)
+
 	local s = Instance.new("Sound")
-	s.Name = "HB_Preview"
+	s.Name = PREVIEW_NAME
 	s.SoundId = "rbxassetid://" .. item.numId
 	s.Volume = CONFIG.PREVIEW_VOLUME
 	s.Parent = SoundService
@@ -843,6 +948,7 @@ local function playPreview(item)
 	end)
 	if ok then
 		previewLabel.Text = "试听: " .. item.name .. "  (id " .. item.numId .. ")"
+			.. (mutedState and "  [游戏已静音]" or "")
 		btnPreviewStop.Visible = true
 	else
 		local msg = "试听失败（资源可能不可访问）: " .. item.name
@@ -1150,6 +1256,7 @@ local function doScan()
 	stopPreview()
 	items = {}
 	itemById = {}
+	allSounds = {}
 	selected = {}
 	scanned = false
 	clearRows()
@@ -1281,6 +1388,36 @@ end
 btnExport.MouseButton1Click:Connect(exportIndex)
 btnDiag.MouseButton1Click:Connect(runDiagnose)
 
+-- 静音开关
+local function refreshMuteBtn()
+	if muteEnabled then
+		btnMute.Text = "静音游戏"
+		btnMute.BackgroundColor3 = C.accent
+	else
+		btnMute.Text = "未静音"
+		btnMute.BackgroundColor3 = C.panel2
+	end
+end
+refreshMuteBtn()
+
+if btnMute then
+	btnMute.MouseButton1Click:Connect(function()
+		muteEnabled = not muteEnabled
+		if not muteEnabled then
+			-- 立刻把游戏声音恢复
+			local n = unmuteGame()
+			setStatus("已关闭试听静音" .. (n and ("，恢复 " .. n .. " 个声音") or ""), C.dim)
+		elseif previewSound then
+			-- 正在试听，立刻补上静音（正在播的那个不能静）
+			muteGame(previewOwned and nil or previewSound)
+			setStatus("已开启试听静音", C.ok)
+		else
+			setStatus("已开启试听静音（下次试听生效）", C.ok)
+		end
+		refreshMuteBtn()
+	end)
+end
+
 btnPreviewStop.MouseButton1Click:Connect(function()
 	stopPreview()
 end)
@@ -1303,6 +1440,7 @@ closeBtn.MouseButton1Click:Connect(function()
 		end
 	end
 	stopPreview()
+	unmuteGame()      -- 兜底：绝不能把游戏留在静音状态
 	if previewSound then
 		pcall(function() previewSound:Destroy() end)
 	end
