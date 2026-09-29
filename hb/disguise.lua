@@ -125,8 +125,10 @@ local build = (function()
     这里保留「查用户名 -> 拉外观 -> 套用」这条主线，并按要求新增一个
     「目标玩家」单项下拉框，直接读取当前服务器里的人员，省得手打名字。
 
-    Boreal 的 Dropdown 没有运行时替换 Values 的方法，所以「刷新」是把
-    下拉框 Destroy 掉再在同一个 Section 里重建（跟 NPC交互 里一样的做法）。
+    下拉框用 Boreal 原生的 SpecialType = "Player"：它自己遍历 Players:GetPlayers()
+    并靠 AutoRefreshSpecialValues 自动更新候选项，不需要 Destroy 重建。
+    之前是 Destroy + 新建，新控件会被追加到 Section 末尾，
+    看起来就是「点一下刷新，下拉框移位了」——已修掉。
 ]]
 
 return function(tab, ctx)
@@ -148,69 +150,58 @@ return function(tab, ctx)
 	})
 
 	--==========================================================
-	-- 服务器人员列表（下拉框 + 重建）
+	-- 服务器人员列表
+	--
+	-- 用 Boreal 原生的 SpecialType = "Player"：
+	--   BuildPlayerValues() 直接遍历 Players:GetPlayers()，Value 就是玩家名
+	--   AutoRefreshSpecialValues 默认为 true，玩家进出会自动更新候选项
+	--   ExcludeLocalPlayer 排除自己（伪装对象是别人）
+	--   顺带自带头像和 DisplayName 说明
+	-- 所以完全不需要 Destroy 重建 —— 重建会把新控件追加到 Section 末尾，
+	-- 表现就是「点一下刷新，下拉框跑到别的位置去了」。
 	--==========================================================
 	local selectedTarget = nil
 
-	local function listPlayerNames()
-		local names = {}
-		for _, p in ipairs(Players:GetPlayers()) do
-			table.insert(names, p.Name)
+	-- 回调给的可能是玩家名，也可能是 Player 对象，两种都接住
+	local function toName(v)
+		if type(v) == "string" then
+			return v
 		end
-		table.sort(names, function(a, b)
-			return a:lower() < b:lower()
-		end)
-		return names
+		if type(v) == "table" and v.Name then
+			return v.Name
+		end
+		return nil
 	end
 
 	local targetDropdown = sec:Dropdown({
 		Title = "目标玩家（当前服务器）",
 		Desc = "从服务器人员里单选一个作为伪装目标",
-		Values = listPlayerNames(),
+		SpecialType = "Player",
+		ExcludeLocalPlayer = true,
+		AutoRefreshSpecialValues = true,
+		SearchBarEnabled = true,
+		AllowNone = true,
 		Value = nil,
 		Callback = function(v)
-			selectedTarget = v
+			selectedTarget = toName(v)
 		end,
 	})
-
-	-- Boreal 重建下拉框只有一条路：Destroy 掉旧的，再在同一个 Section 里新建。
-	local function rebuildTargetDropdown()
-		local values = listPlayerNames()
-		local ok = pcall(function()
-			targetDropdown:Destroy()
-		end)
-		if not ok then
-			notify("伪装玩家", "Dropdown:Destroy() 不可用，无法重建（当前 " .. tostring(#values) .. " 人）", "x")
-			return
-		end
-		targetDropdown = sec:Dropdown({
-			Title = "目标玩家（当前服务器）",
-			Desc = "从服务器人员里单选一个作为伪装目标",
-			Values = values,
-			Value = selectedTarget,
-			Callback = function(v)
-				selectedTarget = v
-			end,
-		})
-		notify("伪装玩家", "已刷新人员列表（" .. tostring(#values) .. " 人）")
-	end
 
 	sec:Button({
 		Title = "刷新人员列表",
-		Desc = "重新读取当前服务器里的玩家并重建下拉框",
+		Desc = "重新读取当前服务器里的玩家（只更新候选项，控件位置不变）",
 		Icon = "refresh-cw",
 		Callback = function()
-			rebuildTargetDropdown()
+			local ok, err = pcall(function()
+				targetDropdown:Refresh()
+			end)
+			if ok then
+				notify("伪装玩家", "已刷新人员列表（当前 " .. tostring(#Players:GetPlayers()) .. " 人）")
+			else
+				notify("伪装玩家", "刷新失败：" .. tostring(err), "x")
+			end
 		end,
 	})
-
-	-- 玩家进出服务器时，下拉框里的快照就旧了；这里顺手提示一下
-	local joinConn = Players.PlayerAdded:Connect(function()
-		notify("伪装玩家", "有玩家加入，点「刷新人员列表」更新下拉框")
-	end)
-	local leaveConn = Players.PlayerRemoving:Connect(function()
-		notify("伪装玩家", "有玩家离开，点「刷新人员列表」更新下拉框")
-	end)
 
 	sec:Divider()
 
@@ -390,16 +381,9 @@ return function(tab, ctx)
 		end,
 	})
 
-	if ctx.onClose then
-		ctx.onClose(function()
-			if joinConn then
-				joinConn:Disconnect()
-			end
-			if leaveConn then
-				leaveConn:Disconnect()
-			end
-		end)
-	end
+	-- 本模块不需要在关窗时清理连接：
+	-- 下拉框是 Boreal 原生的 SpecialType="Player"，它的自动刷新连接归 Boreal 自己管，
+	-- 玩家进出的通知也按你的要求去掉了。
 end
 end)()
 
