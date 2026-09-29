@@ -17,7 +17,7 @@ if getgenv().__HB_DISGUISE_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.HBDisguiseTab) or getgenv().SutureHBHBDisguiseTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.HBDisguiseTab) or getgenv().SutureHBDisguiseTab
 if not Tab then
 	warn("[伪装玩家] 未找到页签（主脚本没赋值 getgenv().Tabs.HBDisguiseTab？）")
 	return
