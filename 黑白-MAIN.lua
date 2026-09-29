@@ -1,4 +1,3 @@
-local ... = ...
 
 return (function(arg, ...)
 	if game.Close ~= game.Close then
