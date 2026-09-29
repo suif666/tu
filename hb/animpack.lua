@@ -17,7 +17,7 @@ if getgenv().__HB_ANIMPACK_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.HBAnimTab) or getgenv().SutureHBHBAnimTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.HBAnimTab) or getgenv().SutureHBAnimTab
 if not Tab then
 	warn("[动画包] 未找到页签（主脚本没赋值 getgenv().Tabs.HBAnimTab？）")
 	return
