@@ -3,10 +3,10 @@
     （源：灾害预警.lua，由 suif.lua 的 lazyLoad 拉取执行）
 
     契约（和 玩家类远程.lua 一致）：
-        主脚本先 getgenv().Tabs.HBDisasterTab = 页签，再 lazyLoad(本文件, "灾害预警", 页签)
+        主脚本先 getgenv().Tabs.ZRZHTab = 页签，再 lazyLoad(本文件, "灾害预警", 页签)
 
     本文件是独立 chunk，看不到主脚本的局部变量：
-        页签    走 getgenv().Tabs.HBDisasterTab
+        页签    走 getgenv().Tabs.ZRZHTab
         WindUI  走 getgenv().HB_WindUI
         win     走 getgenv().HB_win（用于 OnClose）
         notify / readInput / getChar / getHum / isR15 / onClose 在本文件里自己实现，
@@ -17,9 +17,9 @@ if getgenv().__HB_DISASTER_LOADED then
 	return
 end
 
-local Tab = (getgenv().Tabs and getgenv().Tabs.HBDisasterTab) or getgenv().SutureHBHBDisasterTab
+local Tab = (getgenv().Tabs and getgenv().Tabs.ZRZHTab) or getgenv().SutureZRZHTab
 if not Tab then
-	warn("[灾害预警] 未找到页签（主脚本没赋值 getgenv().Tabs.HBDisasterTab？）")
+	warn("[灾害预警] 未找到页签（主脚本没赋值 getgenv().Tabs.ZRZHTab？）")
 	return
 end
 
