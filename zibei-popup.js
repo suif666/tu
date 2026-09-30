@@ -109,12 +109,25 @@
   // ── 保存 ────────────────────────────────────────────────
   function save(patch) {
     chrome.storage.local.set(patch, function () {
-      toast('已保存' + ('codecMode' in patch ? ' · 正在刷新网页…' : ''),
-            'codecMode' in patch);
       if ('codecMode' in patch) {
-        // 刷新一下副标题
+        // 编码改了就直接刷新当前标签页。
+        // 播放器是在页面加载那一刻调用 isTypeSupported() 把编码定死的，
+        // 所以改完必须重载页面才生效 —— 这里不绕弯子，直接刷。
+        // chrome.tabs.reload() 不需要任何额外权限。
+        // bridge.js 里那套（靠 sessionStorage 判断）是给"其它已打开的
+        // 视频标签页"兜底的，两条路径互不冲突。
+        toast('已保存 · 正在刷新网页…', true);
         chrome.storage.local.get(null, function (v) { renderSub(v); });
+        setTimeout(function () {
+          try {
+            chrome.tabs.reload();   // 不传参数 = 刷新当前窗口的活动标签页
+          } catch (err) {
+            toast('已保存 · 请手动刷新页面', true);
+          }
+        }, 400);
+        return;
       }
+      toast('已保存');
     });
   }
 
@@ -157,6 +170,13 @@
   }
 
   $('probe').addEventListener('click', runProbe);
+
+  // 显示扩展版本 —— 用来一眼确认浏览器里跑的到底是哪一版
+  try {
+    var ver = chrome.runtime.getManifest().version;
+    $('ver').textContent = '[自备] v' + ver +
+      (ver === '4.2.0' ? '' : '  ⚠ 磁盘上已是 4.2.0，请到 edge://extensions 点「重新加载」');
+  } catch (e) { /* 忽略 */ }
 
   load();
 })();
