@@ -1,9 +1,17 @@
 {
   "manifest_version": 3,
   "name": "[自备]",
-  "version": "2.1.0",
-  "description": "两项功能：① 让网站回退到 H.264，交给 GPU 硬件解码；② 削减网页动态效果与滚动开销（CSS 动画/过渡/毛玻璃/固定背景、Canvas 高频重绘、scroll 监听限流），降低老机器负载。",
+  "version": "3.0.0",
+  "description": "面向老旧电脑的网页减负：① 可自选编码（自动 / 优先 AVC / 优先 HEVC / 优先 AV1），让网站回退到有 GPU 硬解的格式；② 削减网页动态效果与滚动开销，降低 CPU/GPU 负载。",
   "author": "suif",
+  "minimum_chrome_version": "111",
+  "permissions": [
+    "storage"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": [
@@ -18,7 +26,17 @@
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "ISOLATED"
     }
-  ],
-  "minimum_chrome_version": "111"
+  ]
 }
