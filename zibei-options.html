@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>[自备] 设置</title>
+<style>
+  :root {
+    --bg: #1c1c1e; --card: #2c2c2e; --fg: #f2f2f7; --dim: #98989d;
+    --accent: #0a84ff; --ok: #30d158; --warn: #ff9f0a; --bad: #ff453a;
+    --line: #3a3a3c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin-bottom: 28px; }
+  section {
+    background: var(--card); border-radius: 12px;
+    padding: 20px; margin-bottom: 18px;
+  }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  .hint { color: var(--dim); font-size: 13px; margin-bottom: 14px; }
+  label.opt {
+    display: block; padding: 12px 14px; margin-bottom: 8px;
+    border: 1px solid var(--line); border-radius: 9px; cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  label.opt:hover { border-color: #555; }
+  label.opt:has(input:checked) { border-color: var(--accent); background: rgba(10,132,255,.12); }
+  label.opt input { margin-right: 10px; }
+  .opt .t { font-weight: 600; }
+  .opt .d { color: var(--dim); font-size: 13px; margin-left: 24px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+  .row input { margin: 0; }
+  .row .d { color: var(--dim); font-size: 13px; }
+  button {
+    font: inherit; color: var(--fg); background: #48484a;
+    border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer;
+  }
+  button:hover { background: #5a5a5c; }
+  button.primary { background: var(--accent); }
+  button.primary:hover { background: #3b9bff; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; }
+  td.r { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { font-weight: 600; }
+  .ok   { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .bad  { color: var(--bad); }
+  .dim  { color: var(--dim); }
+  #saved {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: var(--ok); color: #00230a; font-weight: 600;
+    padding: 9px 22px; border-radius: 999px; opacity: 0;
+    transition: opacity .25s; pointer-events: none;
+  }
+  #saved.show { opacity: 1; }
+  .note {
+    background: rgba(255,159,10,.12); border-left: 3px solid var(--warn);
+    padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-top: 14px;
+  }
+  code { background: #3a3a3c; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>[自备]</h1>
+  <div class="sub">网页减负设置 —— 改完自动保存，已打开的页面立即生效（编码项需刷新页面）</div>
+
+  <section>
+    <h2>视频编码</h2>
+    <div class="hint">
+      越新的编码压缩率越高，但老显卡往往没有对应的硬件解码器 —— 那就只能纯 CPU 软解，
+      1080p60 会扛不住。选一个你机器**能硬解**的格式。
+    </div>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="auto">
+      <span class="t">自动（不干预）</span>
+      <div class="d">不拦截任何格式，让网站按浏览器原生支持自己选。网站通常会挑最省流量的那个 —— 老机器上往往就是卡的原因。</div>
+    </label>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="avc">
+      <span class="t">优先 AVC / H.264 <span class="dim">（推荐）</span></span>
+      <div class="d">屏蔽 AV1、HEVC、VP9、VP8，强制网站回退到 H.264。2011–2015 年的 Intel Mac 基本都有 H.264 硬解。</div>
+    </label>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="hevc">
+      <span class="t">优先 HEVC / H.265</span>
+      <div class="d">屏蔽 AV1、VP9、VP8，保留 HEVC 和 H.264。HEVC 同画质下比 H.264 省一半带宽，但只有较新的显卡能硬解。</div>
+    </label>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="av1">
+      <span class="t">优先 AV1</span>
+      <div class="d">屏蔽 HEVC、VP9、VP8，保留 AV1 和 H.264。AV1 压缩率最高，但基本只有 2022 年之后的显卡才有硬解。</div>
+    </label>
+
+    <div class="note">
+      先点下面的「检测本机解码能力」，看哪一行的<b>硬解</b>是 ✅，再回来选。
+      选错会直接导致播放卡顿。
+    </div>
+  </section>
+
+  <section>
+    <h2>检测本机解码能力</h2>
+    <div class="hint">
+      这里的检测结果是浏览器<b>原生</b>能力（不受本扩展拦截影响）。
+      「硬解」= 有专用解码器，CPU 几乎不耗；「软解」= 全靠 CPU 算。
+    </div>
+    <button class="primary" id="probe">开始检测</button>
+    <div id="probeOut"></div>
+  </section>
+
+  <section>
+    <h2>动效与滚动削减</h2>
+    <div class="hint">关掉这些能明显降低 CPU / GPU 负载，代价是页面看起来「朴素」一些。</div>
+
+    <div class="row">
+      <input type="checkbox" id="rafLimit">
+      <label for="rafLimit">
+        <b>Canvas 动画限帧</b>
+        <div class="d">把 requestAnimationFrame 压到 30fps —— 水波纹背景、光标跟随就靠它每帧重绘</div>
+      </label>
+    </div>
+
+    <div class="row">
+      <input type="checkbox" id="scrollLimit">
+      <label for="scrollLimit">
+        <b>滚动监听限流</b>
+        <div class="d">滚动事件处理函数从每秒 60 次降到 30 次 —— 视差、吸顶导航、懒加载判断都挂在这上面</div>
+      </label>
+    </div>
+
+    <div class="note">
+      CSS 那一层（动画/过渡、毛玻璃、固定背景、平滑滚动）<b>没有开关</b> ——
+      它是随扩展一起注入的静态样式表，运行时改不了。想关掉就编辑
+      <code>reduce.css</code>，删掉对应的那一段，然后到 <code>edge://extensions</code>
+      点一下「重新加载」。每段都有注释标明作用。
+    </div>
+  </section>
+
+  <section>
+    <h2>验证</h2>
+    <div class="hint">在任意网页按 F12 打开控制台，执行下面这行，会列出编码拦截、rAF 上限、scroll 限流等逐项结果。</div>
+    <code>__zibei.test()</code>
+  </section>
+</div>
+
+<div id="saved">已保存</div>
+<script src="options.js"></script>
+</body>
+</html>
