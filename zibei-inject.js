@@ -24,15 +24,77 @@
    * 第一部分：编码强制
    * ========================================================== */
 
-  // 屏蔽列表，全部小写。
+  // 各编码的识别串，全部小写。
   // 注意 vp9 / vp09 两种写法都要列：vp9 并不是 vp09 的子串
   // （vp09 中间多一个 0），漏掉哪个都会放过对应的流。
-  //   av01           AV1        —— B站 / YouTube 新默认，软解最重
-  //   hev1 / hvc1    HEVC/H.265 —— B站高码率 / 大会员
+  //   av01           AV1          —— B站 / YouTube 新默认，软解最重
+  //   hev1 / hvc1    HEVC/H.265   —— B站高码率 / 大会员
   //   dvh1 / dvhe    Dolby Vision —— 基于 HEVC，老机器同样解不动
-  //   vp09 / vp9     VP9        —— YouTube 默认
-  //   vp08 / vp8     VP8        —— 很老的格式
-  var BLOCK = ['av01', 'hev1', 'hvc1', 'dvh1', 'dvhe', 'vp09', 'vp9', 'vp08', 'vp8'];
+  //   vp09 / vp9     VP9          —— YouTube 默认
+  //   vp08 / vp8     VP8          —— 很老的格式
+  var TAGS = {
+    av1:  ['av01'],
+    hevc: ['hev1', 'hvc1'],
+    dv:   ['dvh1', 'dvhe'],
+    vp9:  ['vp09', 'vp9'],
+    vp8:  ['vp08', 'vp8']
+  };
+
+  // 四种模式各自「屏蔽哪些」。
+  // avc1 永远不在屏蔽列表里 —— 它是通用兜底，网站只提供 H.264 时
+  // 不能被我们挡住，否则会直接变成"无可用视频源"。
+  var MODE_BLOCK = {
+    auto: [],                                    // 不干预，全部放行
+    avc:  ['av1', 'hevc', 'dv', 'vp9', 'vp8'],   // 只留 H.264
+    hevc: ['av1', 'dv', 'vp9', 'vp8'],           // 留 HEVC + H.264
+    av1:  ['hevc', 'dv', 'vp9', 'vp8']           // 留 AV1 + H.264
+  };
+
+  var MODE_NAMES = {
+    auto: '自动（不干预）',
+    avc:  '优先 AVC / H.264',
+    hevc: '优先 HEVC / H.265',
+    av1:  '优先 AV1'
+  };
+
+  // 从 <html> 的 data-* 属性读设置。
+  //
+  // 为什么要绕 DOM：本脚本跑在网页的 MAIN world 里（必须如此，否则
+  // 覆写不到网页自己的 MediaSource），而 MAIN world 读不到扩展的
+  // chrome.storage。于是由 bridge.js 在隔离世界读好设置，写成 data-*
+  // 属性 —— 两个世界共享同一个 DOM。
+  //
+  // 钩子是「注册时就位、调用时才读设置」，所以 storage 那 1ms 的异步
+  // 延迟完全不影响：播放器初始化远在那之后。
+  function getMode() {
+    var el = document.documentElement;
+    var m = (el && el.getAttribute) ? el.getAttribute('data-zibei-codec') : null;
+    if (m !== 'auto' && m !== 'avc' && m !== 'hevc' && m !== 'av1') m = 'avc';
+    return m;
+  }
+
+  // 读一个开关型属性。属性缺失时按「开」处理 ——
+  // bridge.js 还没跑完的那一瞬间不应该导致功能失效。
+  function toggleOn(attr) {
+    var el = document.documentElement;
+    if (!el || !el.getAttribute) return true;
+    return el.getAttribute(attr) !== '0';
+  }
+
+  // 把模式翻译成实际要拦截的字符串列表，并缓存 ——
+  // isTypeSupported 会被调用很多次，不必每次都重建数组。
+  var _blKey = null, _blList = MODE_BLOCK.avc;
+  function blockList() {
+    var key = getMode();
+    if (key !== _blKey) {
+      var names = MODE_BLOCK[key] || MODE_BLOCK.avc;
+      var out = [];
+      for (var i = 0; i < names.length; i++) out = out.concat(TAGS[names[i]]);
+      _blKey = key;
+      _blList = out;
+    }
+    return _blList;
+  }
 
   // 注意：必须用「包含」判断，不能用「开头」判断。
   // 真实的 MIME 串长这样：
@@ -40,9 +102,11 @@
   //                 ^^^^^ 开头是 video/，所以前缀匹配永远不成立。
   function isBlocked(type) {
     if (typeof type !== 'string') return false;
+    var list = blockList();
+    if (!list.length) return false;          // auto 模式：什么都不拦
     var t = type.trim().toLowerCase();
-    for (var i = 0; i < BLOCK.length; i++) {
-      if (t.indexOf(BLOCK[i]) !== -1) return true;
+    for (var i = 0; i < list.length; i++) {
+      if (t.indexOf(list[i]) !== -1) return true;
     }
     return false;
   }
@@ -191,8 +255,11 @@
       };
 
       var rafFlush = function (timestamp) {
-        // 时间片还没到 —— 整批顺延到下一帧，不丢任何回调
-        if (nowMs() - rafLast < RAF_MIN_INTERVAL - 1) {
+        // 设置页把「Canvas 动画限帧」关掉时，直接按浏览器原生帧率跑
+        // —— 仍然整批执行，只是不再等时间片。
+        if (toggleOn('data-zibei-raf') &&
+            nowMs() - rafLast < RAF_MIN_INTERVAL - 1) {
+          // 时间片还没到 —— 整批顺延到下一帧，不丢任何回调
           origRAF.call(window, rafFlush);
           return;
         }
@@ -264,11 +331,13 @@
             wrapped = function (ev) {
               var now = (window.performance && performance.now)
                 ? performance.now() : Date.now();
+              // 设置页把「滚动监听限流」关掉时直接放行
               // 减 1ms 是容差。事件间隔和限流间隔往往正好是同一个值的
               // 倍数（比如都是 1000/60 与 1000/30），浮点误差会让
               // "刚好到点"的那一次判成"还没到"，实际频率掉到 20+Hz。
               // 留 1ms 容差后就稳定在目标频率上了。
-              if (now - lastCall < SCROLL_MIN_INTERVAL - 1) return;
+              if (toggleOn('data-zibei-scroll') &&
+                  now - lastCall < SCROLL_MIN_INTERVAL - 1) return;
               lastCall = now;
               return listener.call(this, ev);
             };
@@ -296,25 +365,40 @@
    * ========================================================== */
   try {
     window.__zibei = {
-      blocked: BLOCK.slice(),
-      rafFpsLimit: RAF_MIN_INTERVAL > 0 ? Math.round(1000 / RAF_MIN_INTERVAL) : 0,
+      get mode() { return getMode(); },
+      get modeName() { return MODE_NAMES[getMode()]; },
+      get blocked() { return blockList().slice(); },
+      rafFpsLimit: Math.round(1000 / RAF_MIN_INTERVAL),
+      scrollHzLimit: Math.round(1000 / SCROLL_MIN_INTERVAL),
       isBlocked: isBlocked,
 
-      // 检查编码拦截是否生效
+      // 检查编码拦截是否生效。
+      // 注意期望值随模式变化 —— auto 模式下什么都拦不住，是正常的。
       testCodec: function () {
         var ms = window.MediaSource;
-        return {
-          '屏蔽 av01 (应为 true)':  isBlocked('video/mp4; codecs="av01.0.05M.08"'),
-          '屏蔽 hev1 (应为 true)':  isBlocked('video/mp4; codecs="hev1.1.6.L93.B0"'),
-          '屏蔽 vp09 (应为 true)':  isBlocked('video/mp4; codecs="vp09.00.51.08"'),
-          '屏蔽 vp9  (应为 true)':  isBlocked('video/webm; codecs="vp9"'),
-          '放行 avc1 (应为 false)': isBlocked('video/mp4; codecs="avc1.640028"'),
-          '放行 aac  (应为 false)': isBlocked('audio/mp4; codecs="mp4a.40.2"'),
-          'isTypeSupported(av01) (应为 false)':
-            ms ? ms.isTypeSupported('video/mp4; codecs="av01.0.05M.08"') : 'N/A',
-          'isTypeSupported(avc1) (应为 true)':
-            ms ? ms.isTypeSupported('video/mp4; codecs="avc1.640028"') : 'N/A'
-        };
+        var mode = getMode();
+        var blocked = (mode !== 'auto');
+        var blockHevc = (mode === 'avc' || mode === 'av1');
+        var out = {};
+        out['当前模式'] = MODE_NAMES[mode];
+        out['实际拦截串'] = (blockList().join(', ') || '(空 —— 不拦截任何格式)');
+        out['屏蔽 av01（应为 ' + blocked + '）'] =
+          isBlocked('video/mp4; codecs="av01.0.05M.08"');
+        out['屏蔽 hev1（应为 ' + blockHevc + '）'] =
+          isBlocked('video/mp4; codecs="hev1.1.6.L93.B0"');
+        out['屏蔽 vp09（应为 ' + blocked + '）'] =
+          isBlocked('video/mp4; codecs="vp09.00.51.08"');
+        out['屏蔽 vp9 （应为 ' + blocked + '）'] =
+          isBlocked('video/webm; codecs="vp9"');
+        out['放行 avc1（恒为 false）'] =
+          isBlocked('video/mp4; codecs="avc1.640028"');
+        out['放行 aac （恒为 false）'] =
+          isBlocked('audio/mp4; codecs="mp4a.40.2"');
+        out['isTypeSupported(av01)'] =
+          ms ? ms.isTypeSupported('video/mp4; codecs="av01.0.05M.08"') : 'N/A';
+        out['isTypeSupported(avc1)（恒为 true）'] =
+          ms ? ms.isTypeSupported('video/mp4; codecs="avc1.640028"') : 'N/A';
+        return out;
       },
 
       // 检查动效削减是否生效
@@ -326,10 +410,10 @@
             window.matchMedia('(prefers-reduced-motion: no-preference)').matches,
           '普通媒体查询是否透传 (应为 false)':
             window.matchMedia('(min-width: 999999px)').matches,
-          'rAF 帧率上限': (RAF_MIN_INTERVAL > 0
-            ? Math.round(1000 / RAF_MIN_INTERVAL) + ' fps' : '未启用'),
-          'scroll 监听限流': (SCROLL_MIN_INTERVAL > 0
-            ? Math.round(1000 / SCROLL_MIN_INTERVAL) + ' Hz' : '未启用'),
+          'rAF 帧率上限': (toggleOn('data-zibei-raf')
+            ? Math.round(1000 / RAF_MIN_INTERVAL) + ' fps' : '已关闭（原生帧率）'),
+          'scroll 监听限流': (toggleOn('data-zibei-scroll')
+            ? Math.round(1000 / SCROLL_MIN_INTERVAL) + ' Hz' : '已关闭'),
           'Element.animate 是否已接管':
             (window.Element && Element.prototype.animate &&
              Element.prototype.animate.toString().indexOf('origAnimate') !== -1)
@@ -351,9 +435,12 @@
   try {
     if (window.top === window.self && /bilibili|youtube|b23\.tv/.test(location.host)) {
       console.log('[自备] 已生效 @ ' + location.host +
-                  ' ｜ 编码屏蔽: ' + BLOCK.join(', ') +
-                  ' ｜ rAF 上限: ' + (RAF_MIN_INTERVAL > 0
+                  ' ｜ 编码模式: ' + MODE_NAMES[getMode()] +
+                  ' ｜ 拦截: ' + (blockList().join(', ') || '无') +
+                  ' ｜ rAF: ' + (toggleOn('data-zibei-raf')
                     ? Math.round(1000 / RAF_MIN_INTERVAL) + 'fps' : '关闭') +
+                  ' ｜ scroll: ' + (toggleOn('data-zibei-scroll')
+                    ? Math.round(1000 / SCROLL_MIN_INTERVAL) + 'Hz' : '关闭') +
                   ' ｜ 自检: 执行 __zibei.test()');
     }
   } catch (e) { /* 忽略 */ }
