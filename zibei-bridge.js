@@ -86,15 +86,49 @@
   //
   // 必须在播放器启动前写好，否则这一页不生效 —— 所以放在 document_start
   // 阶段。B站 播放器版本更新时还会自己重置这个偏好，因此每次加载都写一遍。
+  // 编码枚举，B站 内部就是这么定义的（从 core.js 挖出来的）
+  //   0 = RECOMMEND（默认，顺序 AV1 → HEVC → AVC）
+  //   1 = 优先 HEVC
+  //   2 = DISABLE（优先 AVC）
+  //   3 = 优先 AV1
+  var CODEC_ENUM = { avc: '2', hevc: '1', av1: '3' };
+
   var SITE_ADAPTERS = [
     {
       match: /(^|\.)bilibili\.com$/i,
-      strategyKey: 'bilibili_player_codec_prefer_strategy',
-      av1ErrorKey: 'enableAV1Error',
-      hevcErrorKey: 'enableHEVCError',
-      strategyValue: { avc: '2', hevc: '1', av1: '3' }
+
+      // localStorage：播放器自己的编码偏好。
+      // ★ 两个键都要写。getUserCodecPreferType() 只读 prefer_type，
+      //   prefer_strategy 只在它返回 0(RECOMMEND) 时才被参考。
+      //   只写 strategy 会出现"选 AVC 有效、选 AV1 无效"——
+      //   因为挑 AV1 的函数里有个 switch(type)：type 是 1 或 2 时
+      //   直接把 AV1 无条件关掉，根本不看 strategy。
+      ls: {
+        codecType:     'bilibili_player_codec_prefer_type',
+        codecStrategy: 'bilibili_player_codec_prefer_strategy'
+      },
+
+      // localStorage：上次解码失败的记录（含 reactivateTime）。
+      // 没到期之前播放器会把这个编码整个跳过，想用就必须先删掉。
+      // 键名由 getLocalDecodeErrorInfo 拼出来："decode" + 编码 + "Error"
+      lsDecodeError: { av1: 'decodeAV1Error', hevc: 'decodeHEVCError' },
+
+      // sessionStorage：编码级总开关，'1' = 关闭
+      ss: { av1: 'enableAV1Error', hevc: 'enableHEVCError' }
     }
   ];
+
+  function writeLS(key, val) {
+    try {
+      if (localStorage.getItem(key) !== val) localStorage.setItem(key, val);
+    } catch (e) { /* 无痕模式等，忽略 */ }
+  }
+
+  function removeLS(key) {
+    try {
+      if (localStorage.getItem(key) !== null) localStorage.removeItem(key);
+    } catch (e) { /* 忽略 */ }
+  }
 
   function setSessionFlag(key, off) {
     if (!key) return;
@@ -116,22 +150,26 @@
       var a = SITE_ADAPTERS[i];
       if (!a.match.test(host)) continue;
 
-      // 1) 站点自己的编码偏好
-      var v = a.strategyValue[eff];
+      // 1) 站点自己的编码偏好：两个键写同一个枚举值
+      var v = CODEC_ENUM[eff];
       if (v) {
-        try {
-          if (localStorage.getItem(a.strategyKey) !== v) {
-            localStorage.setItem(a.strategyKey, v);
-          }
-        } catch (e) { /* 无痕模式等，忽略 */ }
+        writeLS(a.ls.codecType, v);
+        writeLS(a.ls.codecStrategy, v);
       }
 
-      // 2) 关掉本站对"我们不允许的编码"的开关
-      //    avc  → AV1、HEVC 都关
-      //    hevc → 只关 AV1
-      //    av1  → 只关 HEVC
-      setSessionFlag(a.av1ErrorKey,  eff === 'avc' || eff === 'hevc');
-      setSessionFlag(a.hevcErrorKey, eff === 'avc' || eff === 'av1');
+      // 2) 编码级总开关
+      //    avc  → AV1 关、HEVC 关
+      //    hevc → AV1 关、HEVC 开
+      //    av1  → AV1 开、HEVC 关
+      setSessionFlag(a.ss.av1,  eff !== 'av1');
+      setSessionFlag(a.ss.hevc, eff !== 'hevc');
+
+      // 3) 清掉"上次解码失败"的记录。
+      //    否则即使偏好选对了，播放器仍会因为这条记录跳过它 ——
+      //    这是"改成 AV1 但还是 H.264"的第二个原因。
+      if (eff === 'av1')  removeLS(a.lsDecodeError.av1);
+      if (eff === 'hevc') removeLS(a.lsDecodeError.hevc);
+
       return;
     }
   }
