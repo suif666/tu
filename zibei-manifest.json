@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "[自备]",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "面向老旧电脑的网页减负：① 视频编码自动/手动选择 —— 探测本机硬解能力后强制网站配合，优先走 GPU 解码；② 削减网页动态效果与滚动开销，降低 CPU/GPU 负载。",
   "author": "suif",
   "minimum_chrome_version": "111",
