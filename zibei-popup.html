@@ -60,6 +60,10 @@
   }
   #saved.show { opacity: 1; }
   #saved.warn { color: var(--warn); }
+  .ver {
+    text-align: center; color: var(--dim); font-size: 10.5px;
+    margin-top: 6px; font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
@@ -127,6 +131,7 @@
   </div>
 
   <div id="saved">&nbsp;</div>
+  <div class="ver" id="ver"></div>
 
   <script src="probe.js"></script>
   <script src="popup.js"></script>
