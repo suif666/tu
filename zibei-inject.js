@@ -91,6 +91,14 @@
   // 想更省电可以改成 1000/20（20fps）；想关掉这功能就设成 0。
   var RAF_MIN_INTERVAL = 1000 / 30;
 
+  // 滚动事件监听器的调用频率上限。
+  // 滚动卡顿的另一大来源：网站给 scroll 挂了很重的处理函数，
+  // 每次滚动都触发。滚动事件本身是按屏幕刷新率（60Hz）发的，
+  // 压到 30Hz 后处理开销直接减半 —— 而且滚动处理函数基本都是
+  // 读取当前位置，丢掉一半事件不影响结果。
+  // 想关掉就设成 0。
+  var SCROLL_MIN_INTERVAL = 1000 / 30;
+
   // —— 4) 强制 prefers-reduced-motion: reduce ——
   // 正规做过适配的网站会读这个媒体查询，然后自己关掉动效。
   // 让网站自己关，比我们硬拆它的 DOM 可靠得多。
@@ -229,6 +237,59 @@
     }
   } catch (e) { /* 忽略 */ }
 
+  // —— 7) scroll 事件监听器限流 ——
+  //
+  // 滚动卡顿的另一大来源：网站给 scroll 挂了很重的处理函数
+  // （视差、吸顶导航、懒加载判断），每次滚动都跑一遍。
+  //
+  // 实现上有两个必须注意的点：
+  //   · 只包装「函数形式」的监听器；对象形式（带 handleEvent 的）
+  //     原样放过，不动它。
+  //   · 必须用 WeakMap 记住「原始监听器 → 包装后监听器」的对应关系。
+  //     否则网站调 removeEventListener 时找不到当初注册的那个包装函数，
+  //     监听器就永远摘不掉 —— 会造成重复触发和内存泄漏。
+  try {
+    if (SCROLL_MIN_INTERVAL > 0 &&
+        window.EventTarget && EventTarget.prototype &&
+        EventTarget.prototype.addEventListener) {
+      var origAddEL = EventTarget.prototype.addEventListener;
+      var origRemoveEL = EventTarget.prototype.removeEventListener;
+      var scrollWrapped = new WeakMap();     // 原始监听器 -> 包装后监听器
+
+      EventTarget.prototype.addEventListener = function (type, listener, options) {
+        if (type === 'scroll' && typeof listener === 'function' && !listener.__zibeiWrapped) {
+          var wrapped = scrollWrapped.get(listener);
+          if (!wrapped) {
+            var lastCall = 0;
+            wrapped = function (ev) {
+              var now = (window.performance && performance.now)
+                ? performance.now() : Date.now();
+              // 减 1ms 是容差。事件间隔和限流间隔往往正好是同一个值的
+              // 倍数（比如都是 1000/60 与 1000/30），浮点误差会让
+              // "刚好到点"的那一次判成"还没到"，实际频率掉到 20+Hz。
+              // 留 1ms 容差后就稳定在目标频率上了。
+              if (now - lastCall < SCROLL_MIN_INTERVAL - 1) return;
+              lastCall = now;
+              return listener.call(this, ev);
+            };
+            wrapped.__zibeiWrapped = true;
+            scrollWrapped.set(listener, wrapped);
+          }
+          return origAddEL.call(this, type, wrapped, options);
+        }
+        return origAddEL.apply(this, arguments);
+      };
+
+      EventTarget.prototype.removeEventListener = function (type, listener, options) {
+        if (type === 'scroll' && typeof listener === 'function') {
+          var wrapped = scrollWrapped.get(listener);
+          if (wrapped) return origRemoveEL.call(this, type, wrapped, options);
+        }
+        return origRemoveEL.apply(this, arguments);
+      };
+    }
+  } catch (e) { /* 忽略 */ }
+
   /* ==========================================================
    * 控制台自检工具
    * 用法：在页面上按 F12，控制台里执行  __zibei.test()
@@ -267,6 +328,8 @@
             window.matchMedia('(min-width: 999999px)').matches,
           'rAF 帧率上限': (RAF_MIN_INTERVAL > 0
             ? Math.round(1000 / RAF_MIN_INTERVAL) + ' fps' : '未启用'),
+          'scroll 监听限流': (SCROLL_MIN_INTERVAL > 0
+            ? Math.round(1000 / SCROLL_MIN_INTERVAL) + ' Hz' : '未启用'),
           'Element.animate 是否已接管':
             (window.Element && Element.prototype.animate &&
              Element.prototype.animate.toString().indexOf('origAnimate') !== -1)
