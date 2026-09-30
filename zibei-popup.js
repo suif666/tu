@@ -175,7 +175,7 @@
   try {
     var ver = chrome.runtime.getManifest().version;
     $('ver').textContent = '[自备] v' + ver +
-      (ver === '4.2.0' ? '' : '  ⚠ 磁盘上已是 4.2.0，请到 edge://extensions 点「重新加载」');
+      (ver === '4.3.0' ? '' : '  ⚠ 磁盘上已是 4.3.0，请到 edge://extensions 点「重新加载」');
   } catch (e) { /* 忽略 */ }
 
   load();
