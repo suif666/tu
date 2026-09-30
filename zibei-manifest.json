@@ -1,14 +1,20 @@
 {
   "manifest_version": 3,
   "name": "[自备]",
-  "version": "2.0.0",
-  "description": "两项功能：① 让网站回退到 H.264，交给 GPU 硬件解码；② 削减网页动态效果（CSS 动画、过渡、毛玻璃、Canvas 高频重绘），降低老机器负载。",
+  "version": "2.1.0",
+  "description": "两项功能：① 让网站回退到 H.264，交给 GPU 硬件解码；② 削减网页动态效果与滚动开销（CSS 动画/过渡/毛玻璃/固定背景、Canvas 高频重绘、scroll 监听限流），降低老机器负载。",
   "author": "suif",
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["inject.js"],
-      "css": ["reduce.css"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "inject.js"
+      ],
+      "css": [
+        "reduce.css"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
