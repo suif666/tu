@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>[自备]</title>
+<style>
+  :root {
+    --bg:#1c1c1e; --card:#2c2c2e; --fg:#f2f2f7; --dim:#98989d;
+    --accent:#0a84ff; --ok:#30d158; --warn:#ff9f0a; --bad:#ff453a;
+    --line:#3a3a3c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    width: 340px; margin: 0; padding: 14px;
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.5 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 14px; margin: 0 0 2px; }
+  h1 small { color: var(--dim); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .hint { color: var(--dim); font-size: 11.5px; margin-bottom: 10px; }
+  .card { background: var(--card); border-radius: 9px; padding: 11px 12px; margin-bottom: 9px; }
+  .card h2 { font-size: 12px; margin: 0 0 7px; color: var(--dim); font-weight: 600; letter-spacing: .3px; }
+
+  label.opt {
+    display: block; padding: 7px 9px; margin: 0 -3px 3px;
+    border: 1px solid transparent; border-radius: 7px; cursor: pointer;
+  }
+  label.opt:hover { background: rgba(255,255,255,.05); }
+  label.opt:has(input:checked) { border-color: var(--accent); background: rgba(10,132,255,.14); }
+  label.opt input { margin: 0 8px 0 0; vertical-align: -1px; }
+  .opt .d { color: var(--dim); font-size: 11px; margin-left: 22px; }
+  .opt .badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 999px;
+    margin-left: 6px; vertical-align: 1px; font-weight: 600;
+  }
+  .badge.hw { background: rgba(48,209,88,.2);  color: var(--ok); }
+  .badge.sw { background: rgba(255,159,10,.2); color: var(--warn); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  td.r { text-align: right; color: var(--dim); }
+  .ok { color: var(--ok); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+
+  .row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; }
+  .row input { margin: 2px 0 0; }
+  .row .d { color: var(--dim); font-size: 11px; }
+
+  button {
+    font: inherit; font-size: 12px; color: var(--fg); background: #48484a;
+    border: 0; border-radius: 7px; padding: 6px 12px; cursor: pointer; width: 100%;
+  }
+  button:hover { background: #5a5a5c; }
+  button:disabled { opacity: .55; cursor: default; }
+  #saved {
+    text-align: center; color: var(--ok); font-size: 11.5px; height: 15px;
+    opacity: 0; transition: opacity .2s;
+  }
+  #saved.show { opacity: 1; }
+  #saved.warn { color: var(--warn); }
+</style>
+</head>
+<body>
+  <h1>[自备] <small>网页减负</small></h1>
+  <div class="hint" id="sub">加载中…</div>
+
+  <div class="card">
+    <h2>视频编码</h2>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="auto">
+      <span>自动</span><span class="badge hw" id="badgeAuto" style="display:none"></span>
+      <div class="d">按本机硬解能力自动选定 —— 推荐</div>
+    </label>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="avc">
+      <span>H.264 / AVC</span>
+      <div class="d">兼容性最好，老显卡基本都有硬解</div>
+    </label>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="hevc">
+      <span>HEVC / H.265</span>
+      <div class="d">同画质省一半带宽，需要较新的显卡硬解</div>
+    </label>
+
+    <label class="opt">
+      <input type="radio" name="codecMode" value="av1">
+      <span>AV1</span>
+      <div class="d">压缩率最高，基本只有 2022 年后的显卡硬解</div>
+    </label>
+  </div>
+
+  <div class="card">
+    <h2>本机解码能力</h2>
+    <table id="probeTable"><tr><td class="r">检测中…</td></tr></table>
+    <div style="margin-top:9px"><button id="probe">重新检测</button></div>
+  </div>
+
+  <div class="card">
+    <h2>动效与滚动</h2>
+    <div class="row">
+      <input type="checkbox" id="rafLimit">
+      <label for="rafLimit">Canvas 动画限帧
+        <div class="d">水波纹背景、光标跟随降到 30fps</div>
+      </label>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="scrollLimit">
+      <label for="scrollLimit">滚动监听限流
+        <div class="d">滚动处理函数从每秒 60 次降到 30 次</div>
+      </label>
+    </div>
+    <div class="d" style="color:var(--dim);font-size:11px;margin-top:4px">
+      CSS 层（动画/毛玻璃/固定背景）由 reduce.css 控制，没有开关。
+    </div>
+  </div>
+
+  <div id="saved">&nbsp;</div>
+
+  <script src="probe.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
