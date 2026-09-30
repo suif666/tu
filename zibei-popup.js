@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var DEFAULTS = { codecMode: 'auto', rafLimit: true, scrollLimit: true };
+  var DEFAULTS = { codecMode: 'auto', rafLimit: true, scrollLimit: true, autoReload: true };
 
   var AUTO_NAMES = {
     av1:  'AV1',
@@ -35,6 +35,7 @@
     if (!hit && rs.length) rs[0].checked = true;
     $('rafLimit').checked    = v.rafLimit !== false;
     $('scrollLimit').checked = v.scrollLimit !== false;
+    $('autoReload').checked  = v.autoReload !== false;
   }
 
   // 在「自动」那一行右侧显示它挑中的编码 + 硬解/软解
@@ -89,6 +90,7 @@
       codecMode:   DEFAULTS.codecMode,
       rafLimit:    DEFAULTS.rafLimit,
       scrollLimit: DEFAULTS.scrollLimit,
+      autoReload:  DEFAULTS.autoReload,
       autoCodec:   null,
       autoEfficient: null,
       autoReport:  null,
@@ -107,7 +109,7 @@
   // ── 保存 ────────────────────────────────────────────────
   function save(patch) {
     chrome.storage.local.set(patch, function () {
-      toast('已保存' + ('codecMode' in patch ? ' · 编码改动需刷新网页' : ''),
+      toast('已保存' + ('codecMode' in patch ? ' · 正在刷新网页…' : ''),
             'codecMode' in patch);
       if ('codecMode' in patch) {
         // 刷新一下副标题
@@ -122,6 +124,7 @@
     if (t.name === 'codecMode')      save({ codecMode: t.value });
     else if (t.id === 'rafLimit')    save({ rafLimit: t.checked });
     else if (t.id === 'scrollLimit') save({ scrollLimit: t.checked });
+    else if (t.id === 'autoReload')  save({ autoReload: t.checked });
   });
 
   // ── 探测 ────────────────────────────────────────────────
