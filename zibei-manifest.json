@@ -1,16 +1,26 @@
 {
   "manifest_version": 3,
   "name": "[自备]",
-  "version": "3.0.0",
-  "description": "面向老旧电脑的网页减负：① 可自选编码（自动 / 优先 AVC / 优先 HEVC / 优先 AV1），让网站回退到有 GPU 硬解的格式；② 削减网页动态效果与滚动开销，降低 CPU/GPU 负载。",
+  "version": "4.0.0",
+  "description": "面向老旧电脑的网页减负：① 视频编码自动/手动选择 —— 探测本机硬解能力后强制网站配合，优先走 GPU 解码；② 削减网页动态效果与滚动开销，降低 CPU/GPU 负载。",
   "author": "suif",
   "minimum_chrome_version": "111",
   "permissions": [
     "storage"
   ],
-  "options_ui": {
-    "page": "options.html",
-    "open_in_tab": true
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "[自备] 网页减负",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "content_scripts": [
     {
@@ -32,6 +42,7 @@
         "<all_urls>"
       ],
       "js": [
+        "probe.js",
         "bridge.js"
       ],
       "run_at": "document_start",
