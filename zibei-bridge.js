@@ -66,6 +66,76 @@
     } catch (e) { return false; }
   }
 
+  // ── 站点适配 ────────────────────────────────────────────
+  //
+  // 有些网站自己有编码偏好开关，光拦 isTypeSupported 不管用：
+  // 它们先读自己的偏好决定"想要哪个"，能力判断只管"能不能放"。
+  //
+  // B站 就是典型。它的播放器按 DEF_CODEC_STRATEGY = [AV1, HEVC, AVC]
+  // 的顺序挑 —— 默认就要 AV1。偏好存在 localStorage 里（也就是它设置里
+  // 「优先 AVC」那个开关）。所以必须直接改它的偏好，而不是只堵 API。
+  //
+  // 键的语义是从 B站 播放器 core.js 里挖出来的：
+  //   localStorage  bilibili_player_codec_prefer_strategy
+  //       0 = RECOMMEND（默认，顺序 AV1 → HEVC → AVC）
+  //       1 = 优先 HEVC
+  //       2 = DISABLE（优先 AVC）   ← 它自己的「优先 AVC」就写这个
+  //       3 = 优先 AV1
+  //   sessionStorage enableAV1Error  = '1' → 关闭 AV1
+  //   sessionStorage enableHEVCError = '1' → 关闭 HEVC
+  //
+  // 必须在播放器启动前写好，否则这一页不生效 —— 所以放在 document_start
+  // 阶段。B站 播放器版本更新时还会自己重置这个偏好，因此每次加载都写一遍。
+  var SITE_ADAPTERS = [
+    {
+      match: /(^|\.)bilibili\.com$/i,
+      strategyKey: 'bilibili_player_codec_prefer_strategy',
+      av1ErrorKey: 'enableAV1Error',
+      hevcErrorKey: 'enableHEVCError',
+      strategyValue: { avc: '2', hevc: '1', av1: '3' }
+    }
+  ];
+
+  function setSessionFlag(key, off) {
+    if (!key) return;
+    try {
+      if (off) {
+        if (sessionStorage.getItem(key) !== '1') sessionStorage.setItem(key, '1');
+      } else if (sessionStorage.getItem(key) !== null) {
+        sessionStorage.removeItem(key);
+      }
+    } catch (e) { /* 忽略 */ }
+  }
+
+  function applySiteAdapter(eff) {
+    if (!eff) return;
+    var host;
+    try { host = location.hostname || ''; } catch (e) { return; }
+
+    for (var i = 0; i < SITE_ADAPTERS.length; i++) {
+      var a = SITE_ADAPTERS[i];
+      if (!a.match.test(host)) continue;
+
+      // 1) 站点自己的编码偏好
+      var v = a.strategyValue[eff];
+      if (v) {
+        try {
+          if (localStorage.getItem(a.strategyKey) !== v) {
+            localStorage.setItem(a.strategyKey, v);
+          }
+        } catch (e) { /* 无痕模式等，忽略 */ }
+      }
+
+      // 2) 关掉本站对"我们不允许的编码"的开关
+      //    avc  → AV1、HEVC 都关
+      //    hevc → 只关 AV1
+      //    av1  → 只关 HEVC
+      setSessionFlag(a.av1ErrorKey,  eff === 'avc' || eff === 'hevc');
+      setSessionFlag(a.hevcErrorKey, eff === 'avc' || eff === 'av1');
+      return;
+    }
+  }
+
   function maybeReload(eff) {
     if (!eff) return;
     // 只在顶层文档动手 —— content script 跑在所有 iframe 里，
@@ -105,6 +175,9 @@
     } catch (e) { /* 忽略 */ }
 
     if (allowReload) {
+      // 真正拿到设置之后，先把站点自己的偏好改掉 —— 这一步必须早于
+      // 播放器初始化，否则这一页不生效。
+      applySiteAdapter(effectiveCodec(mode, autoCodec));
       if (cfg.autoReload !== false) maybeReload(effectiveCodec(mode, autoCodec));
       else ss(function () { sessionStorage.setItem(MARK, effectiveCodec(mode, autoCodec)); });
     }
