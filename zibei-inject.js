@@ -40,21 +40,20 @@
     vp8:  ['vp08', 'vp8']
   };
 
-  // 四种模式各自「屏蔽哪些」。
-  // avc1 永远不在屏蔽列表里 —— 它是通用兜底，网站只提供 H.264 时
-  // 不能被我们挡住，否则会直接变成"无可用视频源"。
-  var MODE_BLOCK = {
-    auto: [],                                    // 不干预，全部放行
-    avc:  ['av1', 'hevc', 'dv', 'vp9', 'vp8'],   // 只留 H.264
-    hevc: ['av1', 'dv', 'vp9', 'vp8'],           // 留 HEVC + H.264
-    av1:  ['hevc', 'dv', 'vp9', 'vp8']           // 留 AV1 + H.264
-  };
+  var ALL_KEYS = ['av1', 'hevc', 'dv', 'vp9', 'vp8'];
 
   var MODE_NAMES = {
-    auto: '自动（不干预）',
+    auto: '自动（按本机硬解能力）',
     avc:  '优先 AVC / H.264',
     hevc: '优先 HEVC / H.265',
     av1:  '优先 AV1'
+  };
+
+  var AUTO_NAMES = {
+    av1:  'AV1',
+    hevc: 'HEVC / H.265',
+    avc:  'H.264 / AVC',
+    vp9:  'VP9'
   };
 
   // 从 <html> 的 data-* 属性读设置。
@@ -69,7 +68,7 @@
   function getMode() {
     var el = document.documentElement;
     var m = (el && el.getAttribute) ? el.getAttribute('data-zibei-codec') : null;
-    if (m !== 'auto' && m !== 'avc' && m !== 'hevc' && m !== 'av1') m = 'avc';
+    if (m !== 'auto' && m !== 'avc' && m !== 'hevc' && m !== 'av1') m = 'auto';
     return m;
   }
 
@@ -81,15 +80,49 @@
     return el.getAttribute(attr) !== '0';
   }
 
+  // 「自动」模式下，本机该用哪种编码 —— 由 bridge.js 探测后写入。
+  //
+  // bridge.js 的探测跑在隔离世界，读到的是浏览器**原生**解码能力，
+  // 用 mediaCapabilities.decodingInfo 拿到 powerEfficient（是否硬解），
+  // 规则是：优先挑有硬解的、压缩率最高的那个；一个硬解都没有时，
+  // 退而挑纯 CPU 开销最低的那个。
+  function getAutoCodec() {
+    var el = document.documentElement;
+    var a = (el && el.getAttribute) ? el.getAttribute('data-zibei-auto') : null;
+    if (a === 'av1' || a === 'hevc' || a === 'avc' || a === 'vp9') return a;
+    return 'avc';   // 还没探测出结果 → 保守用 H.264（老机器上最稳）
+  }
+
+  // 当前模式下允许哪些编码类别
+  function allowKeys() {
+    var mode = getMode();
+    var allow;
+    if (mode === 'auto')       allow = [getAutoCodec()];
+    else if (mode === 'hevc')  allow = ['hevc'];
+    else if (mode === 'av1')   allow = ['av1'];
+    else                       allow = ['avc'];
+
+    // H.264 永远放行 —— 通用兜底。否则遇到只提供 H.264 的网站会直接
+    // 变成"无可用视频源"，比卡顿还糟。
+    if (allow.indexOf('avc') < 0) allow = allow.concat(['avc']);
+    // Dolby Vision 基于 HEVC，允许 HEVC 时一并放行
+    if (allow.indexOf('hevc') >= 0) allow = allow.concat(['dv']);
+    return allow;
+  }
+
   // 把模式翻译成实际要拦截的字符串列表，并缓存 ——
   // isTypeSupported 会被调用很多次，不必每次都重建数组。
-  var _blKey = null, _blList = MODE_BLOCK.avc;
+  var _blKey = null, _blList = [];
   function blockList() {
-    var key = getMode();
+    var mode = getMode();
+    var key = mode + '|' + (mode === 'auto' ? getAutoCodec() : '');
     if (key !== _blKey) {
-      var names = MODE_BLOCK[key] || MODE_BLOCK.avc;
+      var allow = allowKeys();
       var out = [];
-      for (var i = 0; i < names.length; i++) out = out.concat(TAGS[names[i]]);
+      for (var i = 0; i < ALL_KEYS.length; i++) {
+        if (allow.indexOf(ALL_KEYS[i]) >= 0) continue;   // 放行的跳过
+        out = out.concat(TAGS[ALL_KEYS[i]]);
+      }
       _blKey = key;
       _blList = out;
     }
@@ -367,28 +400,35 @@
     window.__zibei = {
       get mode() { return getMode(); },
       get modeName() { return MODE_NAMES[getMode()]; },
+      get autoCodec() { return getAutoCodec(); },
+      get allow() { return allowKeys().slice(); },
       get blocked() { return blockList().slice(); },
       rafFpsLimit: Math.round(1000 / RAF_MIN_INTERVAL),
       scrollHzLimit: Math.round(1000 / SCROLL_MIN_INTERVAL),
       isBlocked: isBlocked,
 
       // 检查编码拦截是否生效。
-      // 注意期望值随模式变化 —— auto 模式下什么都拦不住，是正常的。
+      // 期望值随模式变化 —— 每行括号里都写清楚了当前应该是 true 还是 false。
       testCodec: function () {
         var ms = window.MediaSource;
         var mode = getMode();
-        var blocked = (mode !== 'auto');
-        var blockHevc = (mode === 'avc' || mode === 'av1');
+        var allow = allowKeys();
+        var does = function (k) { return allow.indexOf(k) >= 0; };
         var out = {};
         out['当前模式'] = MODE_NAMES[mode];
+        if (mode === 'auto') {
+          out['自动选定的编码'] = AUTO_NAMES[getAutoCodec()] +
+            (getAutoCodec() === 'avc' ? '（尚未探测出结果时的保守兜底也是它）' : '');
+        }
+        out['放行的编码'] = allow.join(', ');
         out['实际拦截串'] = (blockList().join(', ') || '(空 —— 不拦截任何格式)');
-        out['屏蔽 av01（应为 ' + blocked + '）'] =
+        out['屏蔽 av01（应为 ' + !does('av1') + '）'] =
           isBlocked('video/mp4; codecs="av01.0.05M.08"');
-        out['屏蔽 hev1（应为 ' + blockHevc + '）'] =
+        out['屏蔽 hev1（应为 ' + !does('hevc') + '）'] =
           isBlocked('video/mp4; codecs="hev1.1.6.L93.B0"');
-        out['屏蔽 vp09（应为 ' + blocked + '）'] =
+        out['屏蔽 vp09（应为 ' + !does('vp9') + '）'] =
           isBlocked('video/mp4; codecs="vp09.00.51.08"');
-        out['屏蔽 vp9 （应为 ' + blocked + '）'] =
+        out['屏蔽 vp9 （应为 ' + !does('vp9') + '）'] =
           isBlocked('video/webm; codecs="vp9"');
         out['放行 avc1（恒为 false）'] =
           isBlocked('video/mp4; codecs="avc1.640028"');
@@ -436,6 +476,7 @@
     if (window.top === window.self && /bilibili|youtube|b23\.tv/.test(location.host)) {
       console.log('[自备] 已生效 @ ' + location.host +
                   ' ｜ 编码模式: ' + MODE_NAMES[getMode()] +
+                  (getMode() === 'auto' ? ' → ' + AUTO_NAMES[getAutoCodec()] : '') +
                   ' ｜ 拦截: ' + (blockList().join(', ') || '无') +
                   ' ｜ rAF: ' + (toggleOn('data-zibei-raf')
                     ? Math.round(1000 / RAF_MIN_INTERVAL) + 'fps' : '关闭') +
