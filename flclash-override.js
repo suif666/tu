@@ -323,11 +323,11 @@ const main = (config) => {
 
 
   // ================================================================
-  // 9. Perfect-Rules icon CDN
+  // 9. Icon CDN（自建于 suif666/tu）
   // ================================================================
 
   const iconBaseURL =
-    "https://cdn.jsdelivr.net/gh/n0de-sudo/Perfect-Rules@main/Clash/icons/";
+    "https://cdn.jsdelivr.net/gh/suif666/tu@main/flclash/icons/";
 
 
   const groupIcons = {
@@ -886,11 +886,11 @@ const main = (config) => {
 
 
   // ================================================================
-  // 19. Remote Rule Provider base URL
+  // 19. Remote Rule Provider base URL（自建于 suif666/tu）
   // ================================================================
 
   const ruleBaseURL =
-    "https://cdn.jsdelivr.net/gh/n0de-sudo/Perfect-Rules@main/Clash/rules/";
+    "https://cdn.jsdelivr.net/gh/suif666/tu@main/flclash/rules/";
 
 
   // ================================================================

@@ -1,0 +1,12 @@
+payload:
+  # Discord
+  - PROCESS-NAME-WILDCARD,*Discord*
+
+  # Steam
+  - PROCESS-NAME-WILDCARD,*Steam*
+
+  # Epic Games
+  - PROCESS-NAME-WILDCARD,*EpicGames*
+
+  # WhatsApp
+  - PROCESS-NAME-WILDCARD,*WhatsApp*
