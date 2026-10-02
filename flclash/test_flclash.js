@@ -46,7 +46,7 @@ function makeConfig(opts) {
 }
 
 const BUSINESS = ["AI", "YouTube", "Google", "GitHub", "Netflix", "Spotify",
-                  "Steam", "Telegram", "TikTok", "Apple", "Microsoft", "网络检测"];
+                  "Steam", "Telegram", "TikTok", "Apple", "Microsoft"];
 
 function byName(out, name) {
   return out["proxy-groups"].filter((g) => g && g.name === name)[0];
@@ -188,6 +188,20 @@ console.log("\n\u2550\u2550\u2550\u2550 五、广告拦截必须保持关闭\u25
         out.rules.filter((r) => r.indexOf("Advertising") !== -1), []);
   check("最终规则里没有任何 REJECT",
         out.rules.filter((r) => r.indexOf("REJECT") !== -1), []);
+}
+
+console.log("\n\u2550\u2550\u2550\u2550 五点五、IP 检测必须跟随主选择器\u2550\u2550\u2550\u2550");
+
+{
+  const out = main(makeConfig());
+  const nt = out.rules.filter((r) => r.indexOf("NetworkTest") !== -1)[0];
+
+  check("NetworkTest 指向一键代理（不是独立分组）",
+        nt, "RULE-SET,NetworkTest,一键代理");
+  check("「网络检测」独立分组已移除",
+        out["proxy-groups"].filter((g) => g.name === "网络检测").length, 0);
+  check("rule-providers 里 NetworkTest 仍保留",
+        typeof out["rule-providers"]["NetworkTest"], "object");
 }
 
 console.log("\n\u2550\u2550\u2550\u2550 六、地区分组不受影响\u2550\u2550\u2550\u2550");

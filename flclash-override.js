@@ -1479,9 +1479,11 @@ const main = (config) => {
 
     createBusinessGroup("Apple"),
 
-    createBusinessGroup("Microsoft"),
+    createBusinessGroup("Microsoft")
 
-    createBusinessGroup("网络检测")
+    // 注意：「网络检测」分组已移除。
+    // NetworkTest 规则集现在直接指向「一键代理」，
+    // 所以 IP 检测显示的就是你在主选择器里选的东西。
 
   ];
 
@@ -1572,7 +1574,10 @@ const main = (config) => {
     // Network Test
     // --------------------------------------------------------------
 
-    "RULE-SET,NetworkTest,网络检测",
+    // 原来这里指向一个独立的「网络检测」组。那个组的选择是
+    // store-selected 记下来的，改别的地方它不动 —— 结果就是
+    // "IP 检测永远显示某一个地区"。改成跟随主选择器。
+    "RULE-SET,NetworkTest,一键代理",
 
 
     // --------------------------------------------------------------
