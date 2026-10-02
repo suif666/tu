@@ -1507,7 +1507,9 @@ const main = (config) => {
   // ================================================================
   // 30. Final proxy-group architecture
   //
-  //   Auto-Select (url-test, all nodes)   ← 业务分区里都能选到它
+  //   Node selector（主控：手选节点 / 默认自动选择）
+  //          ↓
+  //   Auto-Select (url-test, all nodes)
   //          ↓
   //   Airport basic groups
   //          ↓
@@ -1516,14 +1518,21 @@ const main = (config) => {
   //   Perfect-Rules region groups
   //          ↓
   //   Domestic Direct
-  //          ↓
-  //   Node selector（手选节点 / 默认自动选择）
   //
   // ================================================================
 
   config["proxy-groups"] =
 
-    (autoSelectGroup ? [autoSelectGroup] : [])
+    // 「节点选择」排最前 —— 它是唯一需要你手动操作的分组。
+    // 分组顺序不影响路由（规则按名字引用分组），只影响客户端里的
+    // 显示顺序；而它被排在最后就等于藏起来了。
+    //
+    // 它引用的「自动选择」排在它后面，属于前向引用 —— 这没问题，
+    // 本配置里「业务分区引用地区组」本来就是前向引用，一直加载正常。
+
+    [nodeSelectGroup]
+
+      .concat(autoSelectGroup ? [autoSelectGroup] : [])
 
       .concat(finalPreservedGroups)
 
@@ -1533,9 +1542,7 @@ const main = (config) => {
 
       .concat([
 
-        domesticDirectGroup,
-
-        nodeSelectGroup
+        domesticDirectGroup
 
       ]);
 

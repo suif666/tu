@@ -127,8 +127,8 @@ console.log("\n\u2550\u2550\u2550\u2550 二、机场没有自动选择组（自�
   check("自建的是 url-test", auto.type, "url-test");
   check("自建的内容是全部节点", auto.proxies, NODES);
   check("自建组带图标", typeof auto.icon === "string", true);
-  check("自建组排在分组列表最前面",
-        out["proxy-groups"][0].name, "自动选择");
+  check("自建组紧跟在节点选择之后",
+        out["proxy-groups"][1].name, "自动选择");
   check("分区 YouTube 第一项是节点选择",
         byName(out, "YouTube").proxies[0], "节点选择");
 }
@@ -211,6 +211,10 @@ console.log("\n\u2550\u2550\u2550\u2550 五点六、节点选择：唯一的主�
   const out = main(makeConfig());
   const ns = byName(out, "节点选择");
 
+  check("★ 节点选择排在分组列表第一位",
+        out["proxy-groups"][0].name, "节点选择");
+  check("★ 自动选择紧跟其后",
+        out["proxy-groups"][1].name, "自动选择");
   check("节点选择组存在", ns !== undefined, true);
   check("节点选择是 select（可手选）", ns.type, "select");
   check("第一项是自动选择，默认行为不变", ns.proxies[0], "自动选择");
