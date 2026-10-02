@@ -333,6 +333,7 @@ const main = (config) => {
   const groupIcons = {
 
     "一键代理": "Proxy.png",
+    "自动选择": "Speedtest.png",
 
     "国内直连": "China.png",
 
@@ -1313,10 +1314,118 @@ const main = (config) => {
 
 
   // ================================================================
-  // 28. Service groups
+  // 28. Auto-Select group
+  //
+  // 每个业务分区（AI / YouTube / …）里都放一个「自动选择」。
+  // 选中它 = 把决定权交给一个 url-test 组，由它实时挑延迟最低的节点。
+  // 也就是"自动选择里挑的是哪个节点，分区就用哪个节点"。
+  //
+  // 这里有个坑：机场通常已经自带一个自动选择组，而且第 17 节
+  // 已经把它改写成 url-test + 全部节点了。如果这时我们再建一个
+  // 同名的，Clash 会因为分组重名直接报错。
+  //
+  // 所以顺序是：
+  //   1. 机场有自动选择组  → 复用它的名字（保留它自己的图标）
+  //   2. 机场没有，但有节点 → 自己建一个叫「自动选择」的
+  //   3. 连节点都没有      → 干脆不加，保持原样（不崩）
+  // ================================================================
+
+  const airportAutoGroups =
+    finalPreservedGroups.filter((g) => {
+
+      return g && g.name && isAutoSelectGroup(g.name);
+
+    });
+
+
+  const selfBuildAuto =
+
+    airportAutoGroups.length === 0 &&
+
+    proxyNames.length > 0;
+
+
+  const autoSelectName =
+
+    airportAutoGroups.length > 0
+      ? airportAutoGroups[0].name
+      : (selfBuildAuto ? "自动选择" : null);
+
+
+  const autoSelectGroup =
+
+    selfBuildAuto
+      ? {
+
+          "name": "自动选择",
+
+          "type": "url-test",
+
+          "proxies": proxyNames.slice(),
+
+          "url": "https://www.gstatic.com/generate_204",
+
+          "interval": 300,
+
+          "timeout": 5000,
+
+          "tolerance": 50,
+
+          "lazy": true,
+
+          "max-failed-times": 3,
+
+          "expected-status": 204
+
+        }
+      : null;
+
+
+  if (autoSelectGroup) {
+
+    // 自己建的补个图标
+
+    const autoIcon = getGroupIcon("自动选择");
+
+    if (autoIcon) {
+      autoSelectGroup["icon"] = autoIcon;
+    }
+
+  } else if (airportAutoGroups.length > 0) {
+
+    // 复用机场的：它没图标才补，有就保留它自己的
+
+    const reusedAuto = airportAutoGroups[0];
+
+    if (!reusedAuto["icon"]) {
+
+      const reusedIcon = getGroupIcon("自动选择");
+
+      if (reusedIcon) {
+        reusedAuto["icon"] = reusedIcon;
+      }
+
+    }
+
+  }
+
+
+  // ================================================================
+  // 29. Service groups
   // ================================================================
 
   function createBusinessGroup(name) {
+
+    // 「自动选择」放第一个 = 同时也成为默认选项。
+    // 注意：profile.store-selected 是 true，所以已经手动选过的
+    // 用户不会被改掉，这里只影响新装 / 没选过的情况。
+
+    const members = [];
+
+    if (autoSelectName) {
+      members.push(autoSelectName);
+    }
+
 
     const group = {
 
@@ -1325,9 +1434,11 @@ const main = (config) => {
       "type": "select",
 
       "proxies":
-        availableRegions.concat([
-          "国内直连"
-        ])
+        members.concat(
+          availableRegions.concat([
+            "国内直连"
+          ])
+        )
 
     };
 
@@ -1376,8 +1487,10 @@ const main = (config) => {
 
 
   // ================================================================
-  // 29. Final proxy-group architecture
+  // 30. Final proxy-group architecture
   //
+  //   Auto-Select (url-test, all nodes)   ← 业务分区里都能选到它
+  //          ↓
   //   Airport basic groups
   //          ↓
   //   Perfect-Rules service groups
@@ -1392,7 +1505,9 @@ const main = (config) => {
 
   config["proxy-groups"] =
 
-    finalPreservedGroups
+    (autoSelectGroup ? [autoSelectGroup] : [])
+
+      .concat(finalPreservedGroups)
 
       .concat(businessGroups)
 
@@ -1408,7 +1523,7 @@ const main = (config) => {
 
 
   // ================================================================
-  // 30. Routing rules
+  // 31. Routing rules
   //
   // Rule Provider order:
   //
@@ -1565,7 +1680,7 @@ const main = (config) => {
 
 
   // ================================================================
-  // 31. Return generated config
+  // 32. Return generated config
   // ================================================================
 
   return config;
