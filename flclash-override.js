@@ -332,7 +332,7 @@ const main = (config) => {
 
   const groupIcons = {
 
-    "一键代理": "Proxy.png",
+    "节点选择": "Proxy.png",
     "自动选择": "Speedtest.png",
 
     "国内直连": "China.png",
@@ -399,7 +399,7 @@ const main = (config) => {
 
   const managedGroups = {
 
-    "一键代理": true,
+    "节点选择": true,
 
     "国内直连": true,
 
@@ -1284,37 +1284,7 @@ const main = (config) => {
 
 
   // ================================================================
-  // 27. One-click Proxy
-  // ================================================================
-
-  const mainSelector = {
-
-    "name": "一键代理",
-
-    "type": "select",
-
-    "proxies":
-      availableRegions.concat([
-        "国内直连"
-      ])
-
-  };
-
-
-  const mainIcon =
-    getGroupIcon("一键代理");
-
-
-  if (mainIcon) {
-
-    mainSelector["icon"] =
-      mainIcon;
-
-  }
-
-
-  // ================================================================
-  // 28. Auto-Select group
+  // 27. Auto-Select group
   //
   // 每个业务分区（AI / YouTube / …）里都放一个「自动选择」。
   // 选中它 = 把决定权交给一个 url-test 组，由它实时挑延迟最低的节点。
@@ -1411,6 +1381,51 @@ const main = (config) => {
 
 
   // ================================================================
+  // 28. Node selector —— 唯一的主控开关
+  //
+  // 这是整个配置里唯一一个"你手选什么就用什么"的分组：
+  //   · 内容是【全部节点】，可以直接挑任意一个
+  //   · 第一项是「自动选择」，所以默认仍然是自动挑延迟最低的
+  //   · 所有兜底规则（MATCH / NetworkTest）都指向它
+  //
+  // 上一版这里叫「一键代理」，内容是各地区分组。问题是它在界面上
+  // 是个中间层 —— 你不碰它就一直是默认值，而那个默认值又悄悄决定
+  // 了所有没被规则命中的流量走哪里。现在扁平化成"一个组、一份节点
+  // 清单"，所见即所得。
+  // ================================================================
+
+  const nodeSelectGroup = {
+
+    "name": "节点选择",
+
+    "type": "select",
+
+    // 有「自动选择」就放最前面当默认；没有就直接列节点。
+    // 一个节点都没有时退回 DIRECT，保证这个组永远合法存在 ——
+    // 否则 MATCH 会指向不存在的分组，Clash 直接拒绝加载。
+
+    "proxies":
+      (autoSelectName ? [autoSelectName] : [])
+        .concat(
+          proxyNames.length > 0 ? proxyNames : ["DIRECT"]
+        )
+
+  };
+
+
+  const nodeSelectIcon =
+    getGroupIcon("节点选择");
+
+
+  if (nodeSelectIcon) {
+
+    nodeSelectGroup["icon"] =
+      nodeSelectIcon;
+
+  }
+
+
+  // ================================================================
   // 29. Service groups
   // ================================================================
 
@@ -1422,9 +1437,10 @@ const main = (config) => {
 
     const members = [];
 
-    if (autoSelectName) {
-      members.push(autoSelectName);
-    }
+    // 放「节点选择」而不是「自动选择」：节点选择的默认值也是
+    // 自动选择，行为一样，但它允许在分区里直接手选单个节点。
+
+    members.push("节点选择");
 
 
     const group = {
@@ -1482,7 +1498,7 @@ const main = (config) => {
     createBusinessGroup("Microsoft")
 
     // 注意：「网络检测」分组已移除。
-    // NetworkTest 规则集现在直接指向「一键代理」，
+    // NetworkTest 规则集现在直接指向「节点选择」，
     // 所以 IP 检测显示的就是你在主选择器里选的东西。
 
   ];
@@ -1501,7 +1517,7 @@ const main = (config) => {
   //          ↓
   //   Domestic Direct
   //          ↓
-  //   One-click Proxy
+  //   Node selector（手选节点 / 默认自动选择）
   //
   // ================================================================
 
@@ -1519,7 +1535,7 @@ const main = (config) => {
 
         domesticDirectGroup,
 
-        mainSelector
+        nodeSelectGroup
 
       ]);
 
@@ -1577,7 +1593,7 @@ const main = (config) => {
     // 原来这里指向一个独立的「网络检测」组。那个组的选择是
     // store-selected 记下来的，改别的地方它不动 —— 结果就是
     // "IP 检测永远显示某一个地区"。改成跟随主选择器。
-    "RULE-SET,NetworkTest,一键代理",
+    "RULE-SET,NetworkTest,节点选择",
 
 
     // --------------------------------------------------------------
@@ -1679,7 +1695,7 @@ const main = (config) => {
     // Final
     // --------------------------------------------------------------
 
-    "MATCH,一键代理"
+    "MATCH,节点选择"
 
   ];
 

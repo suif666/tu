@@ -104,14 +104,14 @@ console.log("\n\u2550\u2550\u2550\u2550 一、机场自带自动选择组（复�
 
   BUSINESS.forEach((b) => {
     const g = byName(out, b);
-    check("分区 " + b + " 第一项是自动选择", g.proxies[0], "自动选择");
+    check("分区 " + b + " 第一项是节点选择", g.proxies[0], "节点选择");
     check("分区 " + b + " 末项仍是国内直连",
           g.proxies[g.proxies.length - 1], "国内直连");
   });
 
   check("分区 AI 的完整选项",
         byName(out, "AI").proxies,
-        ["自动选择", "香港", "日本", "新加坡", "美国", "国内直连"]);
+        ["节点选择", "香港", "日本", "新加坡", "美国", "国内直连"]);
 }
 
 console.log("\n\u2550\u2550\u2550\u2550 二、机场没有自动选择组（自己建一个）\u2550\u2550\u2550\u2550");
@@ -129,8 +129,8 @@ console.log("\n\u2550\u2550\u2550\u2550 二、机场没有自动选择组（自�
   check("自建组带图标", typeof auto.icon === "string", true);
   check("自建组排在分组列表最前面",
         out["proxy-groups"][0].name, "自动选择");
-  check("分区 YouTube 第一项是自动选择",
-        byName(out, "YouTube").proxies[0], "自动选择");
+  check("分区 YouTube 第一项是节点选择",
+        byName(out, "YouTube").proxies[0], "节点选择");
 }
 
 console.log("\n\u2550\u2550\u2550\u2550 三、机场自动选择组叫别的名字\u2550\u2550\u2550\u2550");
@@ -143,8 +143,8 @@ console.log("\n\u2550\u2550\u2550\u2550 三、机场自动选择组叫别的名�
 
   check("沿用机场的英文名，不另建", byName(out, "Auto Select") !== undefined, true);
   check("没有多出一个叫「自动选择」的", byName(out, "自动选择"), undefined);
-  check("分区 Netflix 第一项是机场那个名字",
-        byName(out, "Netflix").proxies[0], "Auto Select");
+  check("分区 Netflix 第一项也是节点选择",
+        byName(out, "Netflix").proxies[0], "节点选择");
 }
 
 console.log("\n\u2550\u2550\u2550\u2550 四、边界：没有节点 / 没有分组\u2550\u2550\u2550\u2550");
@@ -154,7 +154,8 @@ console.log("\n\u2550\u2550\u2550\u2550 四、边界：没有节点 / 没有分�
   invariants("空订阅", out);
 
   check("没有节点时不硬造自动选择组", byName(out, "自动选择"), undefined);
-  check("分区里也不加自动选择", byName(out, "AI").proxies, ["国内直连"]);
+  check("空订阅时分区只有节点选择 + 国内直连",
+        byName(out, "AI").proxies, ["节点选择", "国内直连"]);
   check("没崩，分组仍然产出", out["proxy-groups"].length > 0, true);
 }
 
@@ -196,12 +197,42 @@ console.log("\n\u2550\u2550\u2550\u2550 五点五、IP 检测必须跟随主选�
   const out = main(makeConfig());
   const nt = out.rules.filter((r) => r.indexOf("NetworkTest") !== -1)[0];
 
-  check("NetworkTest 指向一键代理（不是独立分组）",
-        nt, "RULE-SET,NetworkTest,一键代理");
+  check("NetworkTest 指向节点选择（不是独立分组）",
+        nt, "RULE-SET,NetworkTest,节点选择");
   check("「网络检测」独立分组已移除",
         out["proxy-groups"].filter((g) => g.name === "网络检测").length, 0);
   check("rule-providers 里 NetworkTest 仍保留",
         typeof out["rule-providers"]["NetworkTest"], "object");
+}
+
+console.log("\n\u2550\u2550\u2550\u2550 五点六、节点选择：唯一的主控开关\u2550\u2550\u2550\u2550");
+
+{
+  const out = main(makeConfig());
+  const ns = byName(out, "节点选择");
+
+  check("节点选择组存在", ns !== undefined, true);
+  check("节点选择是 select（可手选）", ns.type, "select");
+  check("第一项是自动选择，默认行为不变", ns.proxies[0], "自动选择");
+  check("后面列出全部节点", ns.proxies.slice(1), NODES);
+  check("节点选择带图标", typeof ns.icon, "string");
+
+  check("MATCH 指向节点选择",
+        out.rules.filter((r) => r.indexOf("MATCH") === 0)[0], "MATCH,节点选择");
+  check("NetworkTest 也指向节点选择",
+        out.rules.filter((r) => r.indexOf("NetworkTest") !== -1)[0],
+        "RULE-SET,NetworkTest,节点选择");
+
+  check("旧的「一键代理」已不存在", byName(out, "一键代理"), undefined);
+
+  // 一个节点都没有时，这个组也必须合法存在 ——
+  // 否则 MATCH 会指向不存在的分组，Clash 直接拒绝加载
+  const empty = main(makeConfig({ proxies: [], groups: [] }));
+  const nsEmpty = byName(empty, "节点选择");
+  check("空订阅时节点选择仍存在", nsEmpty !== undefined, true);
+  check("空订阅时退回 DIRECT", nsEmpty.proxies, ["DIRECT"]);
+  check("空订阅时 MATCH 仍然可解析",
+        empty.rules.filter((r) => r.indexOf("MATCH") === 0)[0], "MATCH,节点选择");
 }
 
 console.log("\n\u2550\u2550\u2550\u2550 六、地区分组不受影响\u2550\u2550\u2550\u2550");
@@ -213,9 +244,7 @@ console.log("\n\u2550\u2550\u2550\u2550 六、地区分组不受影响\u2550\u25
   check("地区组只含本地区节点", hk.proxies, ["香港01", "香港02"]);
   check("地区组里没有自动选择",
         hk.proxies.indexOf("自动选择") === -1, true);
-  check("一键代理仍是各地区 + 国内直连",
-        byName(out, "一键代理").proxies,
-        ["香港", "日本", "新加坡", "美国", "国内直连"]);
+  check("旧的「一键代理」已彻底移除", byName(out, "一键代理"), undefined);
 }
 
 console.log("\n\u2550\u2550\u2550\u2550 结果：" + pass + " 通过 / " + fail + " 失败 \u2550\u2550\u2550\u2550\n");
