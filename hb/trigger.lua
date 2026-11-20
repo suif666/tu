@@ -1543,28 +1543,6 @@ return function(tab, ctx)
 		end,
 	})
 
-	local secInfo = tab:Section({ Title = "说明区", Opened = true })  -- 源 9992
-
-	-- 源 9994 ~ 10011 的 14 条说明，原文照搬
-	for _, line in ipairs({
-		"• TouchInterests: 可触碰类物体（如按钮、机关等）",
-		"• ClickDetectors: 可点击类物体（如可点击的部件）",
-		"• ProximityPrompts: 可互动类物体（NPC对话、收集品等）",
-		"• 直接Touched: 无TouchInterest的触摸事件",
-		"• GUI按钮: 自动点击玩家界面的按钮",
-		"• 座位/载具: 自动上座和进入载具",
-		"• 对话框: 自动与NPC对话交互",
-		"• 远程事件: 监听和重放网络事件（进阶）",
-		"• 自动功能开启后会持续检测并触发",
-		"• 快速互动可立即设置HoldDuration为0",
-		"• 无视交互距离限制：自动触发时忽略距离检测",
-		"• 忽略冷却时间：跳过所有交互冷却时间",
-		"• 透视功能可高亮显示可互动对象位置",
-		"• 触发范围圈可视化显示影响范围",
-	}) do
-		secInfo:Paragraph({ Title = "", Desc = line, Image = "info", ImageSize = 14, Color = Color3.fromRGB(72, 72, 72) })
-	end
-
 	-- 执行器缺函数时给一条醒目提示
 	local missing = {}
 	if not hasFireTouch then
