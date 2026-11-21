@@ -213,14 +213,17 @@ sec:Button({
 })
 
 sec:Button({
-    Title = "刷新玩家列表",
-    Desc = "手动重新拉一次候选人（平时会自动更新）",
+    Title = "刷新玩家列表（同步全部）",
+    Desc = "刷新所有脚本里的玩家下拉框（甩飞 / 传送 / 发言 / 伪装都一起更新）",
     Icon = "refresh-cw",
     Callback = function()
-        pcall(function()
-            local dd = sec
-        end)
-        notify("伪装玩家", "列表将在下次刷新时更新", "check")
+        local g = (getgenv and getgenv()) or _G
+        local n = 0
+        if type(g.__SUIF_REFRESH_ALL_PLAYERS) == "function" then
+            local ok, r = pcall(g.__SUIF_REFRESH_ALL_PLAYERS)
+            if ok and type(r) == "number" then n = r end
+        end
+        notify("伪装玩家", ("全部玩家下拉框已更新（%d 个）"):format(n), "check")
     end,
 })
 
@@ -239,6 +242,17 @@ do
             if el.UIElements and el.UIElements.Menu then dd = el break end
         end
     end)
+
+    -- ★ 点一下直接开居中大面板 + 注册到全局刷新总线
+    if dd then
+        local g = (getgenv and getgenv()) or _G
+        if type(g.__SUIF_BIGONLY) == "function" then pcall(g.__SUIF_BIGONLY, dd) end
+        if type(g.__SUIF_REGISTER_PLAYER_DD) == "function" then
+            pcall(g.__SUIF_REGISTER_PLAYER_DD, dd, function(d)
+                d:Refresh(richPlayers(), nil, true)
+            end, "伪装玩家")
+        end
+    end
 
     local lastRefresh, scheduled = 0, false
     local function scheduleRefresh()
