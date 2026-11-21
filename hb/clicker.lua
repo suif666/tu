@@ -90,13 +90,26 @@ local function buildPanel()
         return
     end
 
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "HB_ClickerPanel"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 90
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.Parent = PlayerGui
+    -- ★ 挂到主脚本导出的隐藏容器（gethui/CoreGui），不落 PlayerGui
+    local g0 = (getgenv and getgenv()) or _G
+    local gui
+    if type(g0.__SUIF_HIDDEN_GUI) == "function" then
+        local ok, r = pcall(g0.__SUIF_HIDDEN_GUI, "HB_ClickerPanel", 90)
+        if ok and r then gui = r end
+    end
+    if not gui then
+        gui = Instance.new("ScreenGui")
+        gui.Name = "HB_ClickerPanel"
+        gui.ResetOnSpawn = false
+        gui.IgnoreGuiInset = true
+        gui.DisplayOrder = 90
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        gui.Parent = PlayerGui
+        -- 有隐藏容器就搬过去
+        if type(g0.__SUIF_HIDE_GUI) == "function" then
+            pcall(g0.__SUIF_HIDE_GUI, gui)
+        end
+    end
 
     local frame = Instance.new("Frame")
     frame.Name = "Panel"
