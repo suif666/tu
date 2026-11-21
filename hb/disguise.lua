@@ -178,7 +178,12 @@ return function(tab, ctx)
 		Desc = "从服务器人员里单选一个作为伪装目标",
 		SpecialType = "Player",
 		ExcludeLocalPlayer = true,
-		AutoRefreshSpecialValues = true,
+		-- ★ 关掉内置自动刷新（AutoRefreshSpecialValues）：
+		--   Boreal 的实现是玩家一进/一退就 RefreshSpecialValues(true)，
+		--   重建整个选项列表（每人一个 Frame + 头像 + 说明）+ 重算 CanvasSize，
+		--   人多或频繁进出时就是「莫名其妙周期性卡顿」的来源。
+		--   改由下面自己节流刷新：2 秒内多次变化合并成一次。
+		AutoRefreshSpecialValues = false,
 		SearchBarEnabled = true,
 		AllowNone = true,
 		Value = nil,
@@ -186,6 +191,38 @@ return function(tab, ctx)
 			selectedTarget = toName(v)
 		end,
 	})
+
+	-- ★ 自己接管「玩家进出 → 刷新候选」：
+	--   2 秒窗口内多次进出只刷新一次，且不在玩家进出那一帧同步重建 UI。
+	do
+		local lastRefresh = 0
+		local scheduled = false
+		local function scheduleRefresh()
+			if scheduled then return end
+			scheduled = true
+			local waitFor = 2.0 - (os.clock() - lastRefresh)
+			if waitFor < 0.2 then waitFor = 0.2 end
+			task.delay(waitFor, function()
+				scheduled = false
+				lastRefresh = os.clock()
+				pcall(function()
+					targetDropdown:Refresh()
+				end)
+			end)
+		end
+		local connAdded = Players.PlayerAdded:Connect(scheduleRefresh)
+		local connRemoving = Players.PlayerRemoving:Connect(scheduleRefresh)
+		if ctx and type(ctx.onClose) == "function" then
+			ctx.onClose(function()
+				pcall(function() connAdded:Disconnect() end)
+				pcall(function() connRemoving:Disconnect() end)
+			end)
+		end
+		-- 首帧同步一次，保证打开时列表就是准的
+		task.defer(function()
+			pcall(function() targetDropdown:Refresh() end)
+		end)
+	end
 
 	sec:Button({
 		Title = "刷新人员列表",
@@ -282,10 +319,11 @@ return function(tab, ctx)
 			end
 		end
 
-		-- 强制刷新一次外观
-		local parent = character.Parent
-		character.Parent = nil
-		character.Parent = parent
+		-- ★ 原来这里做了 "character.Parent = nil; character.Parent = parent" 来强制刷新外观。
+		--   把角色从 workspace 摘掉再挂回，会触发：全场景 DescendantAdded/Removed、
+		--   物理与碰撞重建、动画重载、所有监听 CharacterAdded 的脚本重新初始化 ——
+		--   这是点「伪装目标玩家」时最明显的卡顿源。配件/衣服/脸已经换完就生效了，
+		--   不需要再重挂父节点。
 		return true
 	end
 
