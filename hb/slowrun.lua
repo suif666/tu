@@ -1,162 +1,158 @@
---[[
-    黑白提取 · 远程模块：缓慢的快速跑
-    （源：缓慢的快速跑.lua，由 suif.lua 的 lazyLoad 拉取执行）
-
-    契约（和 玩家类远程.lua 一致）：
-        主脚本先 getgenv().Tabs.PlayerTab = 页签，再 lazyLoad(本文件, "缓慢的快速跑", 页签)
-
-    本文件是独立 chunk，看不到主脚本的局部变量：
-        页签    走 getgenv().Tabs.PlayerTab
-        WindUI  走 getgenv().HB_WindUI
-        win     走 getgenv().HB_win（用于 OnClose）
-        notify / readInput / getChar / getHum / isR15 / onClose 在本文件里自己实现，
-        不依赖主脚本导出，主脚本少给东西也不会挂。
+--[[ 缓慢的快速跑（重写版 · 自实现，无远程混淆加载）
+     原理：
+       1. WalkSpeed 拉高 —— 人是真的跑得快
+       2. 把角色「移动类动画」(Run/Walk) 的播放速度压低 —— 看起来是慢动作
+       3. 新动画由 Animator.AnimationPlayed 事件补速度，全程事件驱动，零轮询
 ]]
-
-if getgenv().__HB_SLOWRUN_LOADED then
-	return
-end
-
+if getgenv().__HB_SLOWRUN_LOADED then return end
 local Tab = (getgenv().Tabs and getgenv().Tabs.PlayerTab) or getgenv().SuturePlayerTab
-if not Tab then
-	warn("[缓慢的快速跑] 未找到页签（主脚本没赋值 getgenv().Tabs.PlayerTab？）")
-	return
-end
-
--- 确认页签拿到后才标记；构建失败会在末尾清掉，允许重试
+if not Tab then warn("[缓慢的快速跑] 没拿到 PlayerTab") return end
 getgenv().__HB_SLOWRUN_LOADED = true
 
-local WindUI = getgenv().HB_WindUI
-if type(WindUI) ~= "table" then
-	warn("[缓慢的快速跑] getgenv().HB_WindUI 缺失，无法弹通知（功能仍会尝试构建）")
-end
-
--- ── 自带的 helper，不依赖主脚本 ──
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
+local WindUI = getgenv().HB_WindUI
 
-local function notify(title, content, icon)
-	if type(WindUI) == "table" then
-		pcall(function()
-			WindUI:Notify({
-				Title = tostring(title),
-				Content = tostring(content or ""),
-				Icon = icon or "check",
-				Duration = 2,
-			})
-		end)
-	end
-	print(string.format("[黑白提取][缓慢的快速跑] %s | %s", tostring(title), tostring(content)))
+local function notify(t, c, icon)
+    if type(WindUI) == "table" then
+        pcall(function()
+            WindUI:Notify({ Title = tostring(t), Content = tostring(c or ""), Icon = icon or "check", Duration = 2 })
+        end)
+    end
+    print(("[缓慢的快速跑] %s | %s"):format(tostring(t), tostring(c)))
 end
 
--- 黑白那套 WindUI 用 el:Get()，Boreal 用 el.Value，两边都试一遍
-local function readInput(el)
-	if not el then
-		return ""
-	end
-	local ok, v = pcall(function()
-		return el:Get()
-	end)
-	if ok and v ~= nil then
-		return tostring(v)
-	end
-	return tostring(el.Value or "")
-end
-
-local function getChar(plr)
-	plr = plr or LP
-	return plr.Character
-end
-
-local function getHum(plr)
-	local ch = getChar(plr)
-	if not ch then
-		return nil
-	end
-	return ch:FindFirstChildOfClass("Humanoid") or ch:FindFirstChildOfClass("AnimationController")
-end
-
-local function isR15(plr)
-	local ch = getChar(plr)
-	return ch ~= nil and ch:FindFirstChild("UpperTorso") ~= nil
-end
-
--- 窗口关闭回调：主脚本导出了 win 就挂上去，没有就只记录
-local closeCallbacks = {}
-local function onClose(fn)
-	if type(fn) == "function" then
-		table.insert(closeCallbacks, fn)
-	end
-end
-do
-	local win = getgenv().HB_win
-	if win then
-		pcall(function()
-			win:OnClose(function()
-				local list = closeCallbacks
-				closeCallbacks = {}
-				for _, fn in ipairs(list) do
-					pcall(fn)
-				end
-			end)
-		end)
-	end
-end
-
-local ctx = {
-	notify = notify,
-	readInput = readInput,
-	onClose = onClose,
-	getChar = getChar,
-	getHum = getHum,
-	isR15 = isR15,
+local S = {
+    on = false,
+    speed = 120,
+    animSpeed = 0.35,
+    baseSpeed = 16,
+    conns = {},
 }
 
-local build = (function()
---[[
-    黑白提取 · 缓慢的快速跑
-    源：远程类页签里的一项（源 5563 行）
-
-    上游 pastebin.com/raw/7fLqezjn 是 wearedevs 混淆过的 176,351 字节，
-    没法提取逻辑，只能原样远程加载。
-]]
-
-return function(tab, ctx)
-	local notify = ctx.notify
-
-	local sec = tab:Section({ Title = "缓慢的快速跑（远程）", Opened = true })
-
-	sec:Paragraph({
-		Title = "上游是混淆代码，没法提取逻辑，只能原样远程加载",
-		Desc = "缓慢的快速跑：wearedevs 混淆（约 172 KB）",
-		Image = "alert-triangle",
-		ImageSize = 16,
-		Color = Color3.fromRGB(244, 201, 72),
-	})
-
-	sec:Button({
-		Title = "加载缓慢的快速跑",
-		Desc = "远程加载并执行（wearedevs 混淆）",
-		Icon = "zap",
-		Callback = function()
-			local ok, result = pcall(function()
-				return loadstring(game:HttpGet("https://pastebin.com/raw/7fLqezjn"))()
-			end)
-			if ok then
-				notify("缓慢的快速跑", "已加载")
-			else
-				notify("错误", "加载失败: " .. tostring(result):sub(1, 60), "x")
-			end
-		end,
-	})
+local function getHum()
+    local ch = LP.Character
+    return ch and ch:FindFirstChildOfClass("Humanoid")
 end
-end)()
-
-local ok, err = pcall(build, Tab, ctx)
-if not ok then
-	warn("[缓慢的快速跑] 构建失败: " .. tostring(err))
-	pcall(notify, "缓慢的快速跑", "构建失败: " .. tostring(err), "x")
-	getgenv().__HB_SLOWRUN_LOADED = nil   -- 清掉标志位，允许重试
-else
-	print(string.format("[黑白提取] 远程模块已加载: 缓慢的快速跑 (%d 个元素)", #(Tab.Elements or {})))
+local function getAnimator()
+    local hum = getHum()
+    return hum and hum:FindFirstChildOfClass("Animator")
 end
+
+local function clearConns()
+    for _, c in ipairs(S.conns) do pcall(function() c:Disconnect() end) end
+    S.conns = {}
+end
+
+local function tuneTracks()
+    local anim = getAnimator()
+    if not anim then return end
+    for _, t in ipairs(anim:GetPlayingAnimationTracks()) do
+        pcall(function() t:AdjustSpeed(S.animSpeed) end)
+    end
+end
+
+local function start()
+    clearConns()
+    local hum = getHum()
+    if not hum then notify("缓慢的快速跑", "角色未加载", "x") return end
+    S.baseSpeed = hum.WalkSpeed
+    hum.WalkSpeed = S.speed
+    tuneTracks()
+    local anim = getAnimator()
+    if anim then
+        table.insert(S.conns, anim.AnimationPlayed:Connect(function(track)
+            if not S.on then return end
+            pcall(function() track:AdjustSpeed(S.animSpeed) end)
+        end))
+    end
+    -- 角色重生后自动重新套用（一次连接，不轮询）
+    table.insert(S.conns, LP.CharacterAdded:Connect(function()
+        if not S.on then return end
+        task.wait(0.6)
+        local h = getHum()
+        if h then h.WalkSpeed = S.speed end
+        local a = getAnimator()
+        if a then
+            table.insert(S.conns, a.AnimationPlayed:Connect(function(track)
+                if not S.on then return end
+                pcall(function() track:AdjustSpeed(S.animSpeed) end)
+            end))
+        end
+        tuneTracks()
+    end))
+end
+
+local function stop()
+    S.on = false
+    clearConns()
+    local hum = getHum()
+    if hum then
+        pcall(function() hum.WalkSpeed = (S.baseSpeed > 0 and S.baseSpeed) or 16 end)
+    end
+    local anim = getAnimator()
+    if anim then
+        for _, t in ipairs(anim:GetPlayingAnimationTracks()) do
+            pcall(function() t:AdjustSpeed(1) end)
+        end
+    end
+end
+
+local sec = Tab:Section({ Title = "缓慢的快速跑", Icon = "footprints", Opened = true })
+
+sec:Paragraph({
+    Title = "慢动作外观 + 真实高速",
+    Desc = "移动速度拉高，同时把跑步动画压成慢放，看起来慢其实飞快。全程事件驱动，不占帧。",
+    Image = "info", ImageSize = 16, Color = Color3.fromRGB(120, 180, 255),
+})
+
+sec:Toggle({
+    Title = "启用",
+    Desc = "开启后角色移动动画会变成慢动作",
+    Value = false,
+    Callback = function(v)
+        S.on = v
+        if v then start() else stop() end
+    end,
+})
+
+sec:Slider({
+    Title = "移动速度",
+    Desc = "真实的行走/奔跑速度",
+    Value = 120, Min = 16, Max = 500, Rounding = 0,
+    Callback = function(v)
+        S.speed = v
+        if S.on then
+            local hum = getHum()
+            if hum then hum.WalkSpeed = v end
+        end
+    end,
+})
+
+sec:Slider({
+    Title = "动画慢放倍率",
+    Desc = "越小越慢（0.1 = 慢十倍）",
+    Value = 0.35, Min = 0.05, Max = 1, Rounding = 2,
+    Callback = function(v)
+        S.animSpeed = v
+        if S.on then tuneTracks() end
+    end,
+})
+
+sec:Button({
+    Title = "立即套用一次",
+    Desc = "改了速度又不想重开开关时点这个",
+    Icon = "refresh-cw",
+    Callback = function()
+        if not S.on then notify("缓慢的快速跑", "先打开「启用」", "x") return end
+        local hum = getHum()
+        if hum then hum.WalkSpeed = S.speed end
+        tuneTracks()
+        notify("缓慢的快速跑", "已套用", "check")
+    end,
+})
+
+if getgenv().HB_win and type(getgenv().HB_win.OnClose) == "function" then
+    pcall(function() getgenv().HB_win:OnClose(function() stop() end) end)
+end
+print("[缓慢的快速跑] 已加载（自实现版）")
