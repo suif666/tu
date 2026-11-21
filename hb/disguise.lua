@@ -125,7 +125,7 @@ local build = (function()
     这里保留「查用户名 -> 拉外观 -> 套用」这条主线，并按要求新增一个
     「目标玩家」单项下拉框，直接读取当前服务器里的人员，省得手打名字。
 
-    下拉框用 Boreal 原生的 SpecialType = "Player"：它自己遍历 Players:GetPlayers()
+    下拉框用普通 Dropdown + 富条目（头像 rbxthumb + 玩家名）：
     并靠 AutoRefreshSpecialValues 自动更新候选项，不需要 Destroy 重建。
     之前是 Destroy + 新建，新控件会被追加到 Section 末尾，
     看起来就是「点一下刷新，下拉框移位了」——已修掉。
@@ -152,13 +152,10 @@ return function(tab, ctx)
 	--==========================================================
 	-- 服务器人员列表
 	--
-	-- 用 Boreal 原生的 SpecialType = "Player"：
-	--   BuildPlayerValues() 直接遍历 Players:GetPlayers()，Value 就是玩家名
-	--   AutoRefreshSpecialValues 默认为 true，玩家进出会自动更新候选项
-	--   ExcludeLocalPlayer 排除自己（伪装对象是别人）
-	--   顺带自带头像和 DisplayName 说明
-	-- 所以完全不需要 Destroy 重建 —— 重建会把新控件追加到 Section 末尾，
-	-- 表现就是「点一下刷新，下拉框跑到别的位置去了」。
+	-- ★ 原先用 Boreal 的 SpecialType = "Player"，但它的 BuildPlayerValues()
+	--   会对每个玩家调 GetUserThumbnailAsync（挂起线程的网络请求），是卡顿主因。
+	--   现在改成普通 Dropdown + 富条目：Values 传 {Title=名字, Image=rbxthumb 头像}，
+	--   头像由 ImageLabel 异步加载，不阻塞；玩家进出走下面的 2 秒节流刷新。
 	--==========================================================
 	local selectedTarget = nil
 
@@ -173,22 +170,44 @@ return function(tab, ctx)
 		return nil
 	end
 
+	-- ★ 这里原本是 SpecialType = "Player"。
+	--   Boreal 的实现里 BuildPlayerValues() 会对【每个玩家】调用
+	--   Players:GetUserThumbnailAsync(userId, HeadShot, Size48x48) —— 这是
+	--   会挂起线程的网络请求，串行跑完 N 个玩家就是一两秒的硬卡顿，
+	--   而且玩家进出/AutoRefresh 时还会再跑一遍。这是「伪装玩家一开就卡」的真凶。
+	--
+	--   改成普通下拉框 + 富条目：头像用 rbxthumb://（由 ImageLabel 异步加载，
+	--   不阻塞 Lua 线程），玩家名走 Title，玩家进出用下面的 2 秒节流刷新。
+	local function itemName(v)
+		if type(v) == "table" then return v.Title or v.Name end
+		return toName(v)
+	end
+
+	local function richPlayers()
+		local g = getgenv and getgenv() or _G
+		if type(g.__SUIF_RICH_PLAYERS) == "function" then
+			local ok, r = pcall(g.__SUIF_RICH_PLAYERS, { excludeLocal = true })
+			if ok and type(r) == "table" and #r > 0 then
+				return r
+			end
+		end
+		-- 降级：纯名字（主脚本没给工具时）
+		local out = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LP then out[#out + 1] = p.Name end
+		end
+		return out
+	end
+
 	local targetDropdown = sec:Dropdown({
 		Title = "目标玩家（当前服务器）",
 		Desc = "从服务器人员里单选一个作为伪装目标",
-		SpecialType = "Player",
-		ExcludeLocalPlayer = true,
-		-- ★ 关掉内置自动刷新（AutoRefreshSpecialValues）：
-		--   Boreal 的实现是玩家一进/一退就 RefreshSpecialValues(true)，
-		--   重建整个选项列表（每人一个 Frame + 头像 + 说明）+ 重算 CanvasSize，
-		--   人多或频繁进出时就是「莫名其妙周期性卡顿」的来源。
-		--   改由下面自己节流刷新：2 秒内多次变化合并成一次。
-		AutoRefreshSpecialValues = false,
+		Values = richPlayers(),
 		SearchBarEnabled = true,
 		AllowNone = true,
 		Value = nil,
 		Callback = function(v)
-			selectedTarget = toName(v)
+			selectedTarget = itemName(v)
 		end,
 	})
 
@@ -206,7 +225,7 @@ return function(tab, ctx)
 				scheduled = false
 				lastRefresh = os.clock()
 				pcall(function()
-					targetDropdown:Refresh()
+					targetDropdown:Refresh(richPlayers(), nil, true)
 				end)
 			end)
 		end
@@ -220,7 +239,7 @@ return function(tab, ctx)
 		end
 		-- 首帧同步一次，保证打开时列表就是准的
 		task.defer(function()
-			pcall(function() targetDropdown:Refresh() end)
+			pcall(function() targetDropdown:Refresh(richPlayers(), nil, true) end)
 		end)
 	end
 
@@ -230,7 +249,7 @@ return function(tab, ctx)
 		Icon = "refresh-cw",
 		Callback = function()
 			local ok, err = pcall(function()
-				targetDropdown:Refresh()
+				targetDropdown:Refresh(richPlayers(), nil, true)
 			end)
 			if ok then
 				notify("伪装玩家", "已刷新人员列表（当前 " .. tostring(#Players:GetPlayers()) .. " 人）")
@@ -420,8 +439,8 @@ return function(tab, ctx)
 	})
 
 	-- 本模块不需要在关窗时清理连接：
-	-- 下拉框是 Boreal 原生的 SpecialType="Player"，它的自动刷新连接归 Boreal 自己管，
-	-- 玩家进出的通知也按你的要求去掉了。
+	-- 下拉框已改为普通 Dropdown + 富条目，玩家进出的刷新连接在 build 内部
+	-- 用 ctx.onClose 统一断开，不需要在这里额外清理。
 end
 end)()
 
