@@ -7,8 +7,6 @@ local Translations = {
    -- UI文本导出
 -- 分区：第三方UI
 -- 已移除玩家名、时间、金额、纯数字及特殊符号
-
-return {
     -- 小游戏
     ["Generators"] = "发电机",
     ["Autofarm generators"] = "自动刷取发电机",
@@ -42,6 +40,7 @@ return {
     ["Auto escape"] = "自动逃脱",
     ["Minimum press delay"] = "最小按压延迟",
     ["Maximum press delay"] = "最大按压延迟",
+    ["Azure"] = "蔚蓝",
     ["Auto disarm minigame"] = "自动拆除小游戏",
     ["Minimum time"] = "最短时间",
     ["Maximum time"] = "最长时间",
@@ -1116,7 +1115,7 @@ end)
 wait(0.5)
 
 -- ===== 加载外部脚本 =====
-local ScriptUrl = "https://raw.githubusercontent.com/aibabylaugh/catsaken/refs/heads/main/Beta/catsaken.lua"
+local ScriptUrl = "https://raw.githubusercontent.com/RobloxHacks/Roblox-Hacks/main/Catsaken.lua"
 if ScriptUrl == "" then
     warn("[汉化] 外部脚本 URL 未填写，跳过外部脚本加载")
 else
