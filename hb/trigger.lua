@@ -611,7 +611,10 @@ return function(tab, ctx)
 		end
 		local n = 0
 		for _, d in ipairs(pg:GetDescendants()) do
-			if d:IsA("TextButton") or d:IsA("ImageButton") then
+			local okType = pcall(function() return d:IsA("TextButton") or d:IsA("ImageButton") end)
+			-- 跳过我们自己的菜单和隐藏的按钮，否则会点到自己身上
+			if okType and (d:IsA("TextButton") or d:IsA("ImageButton"))
+				and not reconOwnGui(d) and reconVisible(d) then
 				local ok = pcall(function()
 					firesignal(d.MouseButton1Click)
 					firesignal(d.Activated)
@@ -677,6 +680,199 @@ return function(tab, ctx)
 	end
 
 	-- 源 fn105（9359 ~ 9377）：坐上所有座位
+	-- ═══════════════════════════════════════════════════════════════════════
+	-- 交互侦察
+	--   现在的游戏交互方式五花八门：ProximityPrompt、ClickDetector、
+	--   自定义 GUI 按钮、Tool、Touched 区域……挨个试太慢。
+	--   先扫一遍，直接告诉玩家"这游戏该用哪个功能"。
+	-- ═══════════════════════════════════════════════════════════════════════
+	local RECON_LIST = {
+		{ cls = "ProximityPrompt", name = "靠近提示 ProximityPrompt（现代主流）" },
+		{ cls = "ClickDetector",   name = "点击器 ClickDetector" },
+		{ cls = "Dialog",          name = "官方对话框 Dialog（已绝迹）" },
+		{ cls = "Seat",            name = "座位 Seat" },
+		{ cls = "VehicleSeat",     name = "载具座位 VehicleSeat" },
+		{ cls = "Tool",            name = "工具/道具 Tool" },
+	}
+	local RECON_NAME = {}
+	for _, r in ipairs(RECON_LIST) do RECON_NAME[r.cls] = r.name end
+
+	local function reconVisible(obj)
+		local p = obj
+		while p and p ~= game do
+			if p:IsA("GuiObject") and not p.Visible then return false end
+			if p:IsA("LayerCollector") and not p.Enabled then return false end
+			p = p.Parent
+		end
+		return true
+	end
+
+	local function reconOwnGui(obj)
+		local p = obj
+		while p do
+			if p:IsA("ScreenGui") then
+				local nm = tostring(p.Name)
+				if nm:match("^WindUI") or nm:match("^Suture") or nm:match("^HB_") then
+					return true
+				end
+			end
+			p = p.Parent
+		end
+		return false
+	end
+
+	local function reconScan()
+		local root = localRoot()
+		local origin = root and root.Position or Vector3.new(0, 0, 0)
+		local counts, nearList = {}, {}
+
+		for _, d in ipairs(workspace:GetDescendants()) do
+			local cls = d.ClassName
+			if not RECON_NAME[cls] then
+				if d.Name == "TouchInterest" or d.Name == "TouchTransmitter" then
+					cls = "TouchTransmitter"
+				else
+					cls = nil
+				end
+			end
+			if cls then
+				counts[cls] = (counts[cls] or 0) + 1
+				local part = d.Parent
+				if part and part:IsA("BasePart") then
+					table.insert(nearList, {
+						obj = d, cls = cls,
+						dist = (origin - part.Position).Magnitude,
+					})
+				end
+			end
+		end
+		table.sort(nearList, function(a, b) return a.dist < b.dist end)
+
+		-- 屏幕按钮
+		local pg = LP:FindFirstChildOfClass("PlayerGui")
+		local guiTotal, guiShown = 0, 0
+		if pg then
+			for _, d in ipairs(pg:GetDescendants()) do
+				if d:IsA("TextButton") or d:IsA("ImageButton") then
+					guiTotal = guiTotal + 1
+					if reconVisible(d) and not reconOwnGui(d) then guiShown = guiShown + 1 end
+				end
+			end
+		end
+
+		-- 远程对象
+		local rE, rF, rU = 0, 0, 0
+		local okR = pcall(function()
+			for _, d in ipairs(game:GetDescendants()) do
+				if d:IsA("RemoteEvent") then rE = rE + 1
+				elseif d:IsA("RemoteFunction") then rF = rF + 1
+				elseif d:IsA("UnreliableRemoteEvent") then rU = rU + 1 end
+			end
+		end)
+
+		return counts, nearList, guiTotal, guiShown, rE, rF, rU, okR
+	end
+
+	local lastRecon = nil
+
+	local hasGetConn = type(getconnections) == "function"
+
+	local DIALOG_WORDS = {
+		"继续", "下一个", "下一步", "下一页", "确定", "确认", "好的", "好呀",
+		"接受", "同意", "开始", "开始游戏", "跳过", "关闭", "了解", "知道了",
+		"进入", "出发", "走吧", "对话", "交谈", "说话", "没问题", "收到",
+		"continue", "next", "okay", "ok", "yes", "accept", "agree", "start",
+		"skip", "close", "got it", "proceed", "talk", "speak",
+	}
+	local DIALOG_BLOCK = {
+		"购买", "充值", "支付", "付费", "订阅", "分享", "举报", "删除", "退出",
+		"robux", "buy", "purchase", "pay", "store", "shop", "subscribe", "price",
+	}
+
+	local function parseWords(s)
+		local out = {}
+		if type(s) ~= "string" then return nil end
+		for w in s:gmatch("[^,，%s]+") do
+			if #w > 0 then table.insert(out, w) end
+		end
+		return #out > 0 and out or nil
+	end
+
+	local function btnChainVisible(obj)
+		local p = obj
+		while p and p ~= game do
+			if p:IsA("GuiObject") and not p.Visible then return false end
+			if p:IsA("LayerCollector") and not p.Enabled then return false end
+			p = p.Parent
+		end
+		return true
+	end
+
+	local function btnLabelText(b)
+		local t = ""
+		pcall(function()
+			if b:IsA("TextButton") then t = tostring(b.Text or "") end
+		end)
+		if t == "" then
+			pcall(function()
+				for _, c in ipairs(b:GetDescendants()) do
+					if c:IsA("TextLabel") and tostring(c.Text or "") ~= "" then
+						t = tostring(c.Text)
+						break
+					end
+				end
+			end)
+		end
+		return t
+	end
+
+	local function hitWords(text, list)
+		if text == "" or not list then return nil end
+		local low = text:lower()
+		for _, w in ipairs(list) do
+			if low:find(w:lower(), 1, true) then return w end
+		end
+		return nil
+	end
+
+	local function clickGuiButton(b)
+		-- 不同游戏监听的事件不一样：
+		--   桌面端常用 MouseButton1Click / Activated
+		--   移动端按钮常挂 TouchTap
+		--   有些 UI 库只用 MouseButton1Down + Up 组合
+		-- 全试一遍，只对真有连接的事件动手，避免制造副作用。
+		local events = {}
+		pcall(function()
+			table.insert(events, b.MouseButton1Click)
+			table.insert(events, b.Activated)
+			table.insert(events, b.MouseButton1Down)
+			table.insert(events, b.MouseButton1Up)
+			table.insert(events, b.TouchTap)
+		end)
+
+		local fired = false
+		for _, ev in ipairs(events) do
+			if hasGetConn then
+				local okc, conns = pcall(getconnections, ev)
+				if okc and type(conns) == "table" and #conns > 0 then
+					pcall(function()
+						for _, c in ipairs(conns) do
+							pcall(function() c:Fire() end)
+						end
+					end)
+					fired = true
+				end
+			end
+			if hasFireSignal and not fired then
+				local okf = pcall(firesignal, ev)
+				if okf then fired = true end
+			end
+		end
+		return fired
+	end
+
+	local dialogLog = {}
+
 	local function sitAllSeats()
 		local root = localRoot()
 		if not root then
@@ -970,6 +1166,148 @@ return function(tab, ctx)
 	--==========================================================
 	-- 7. UI
 	--==========================================================
+	local secRecon = tab:Section({ Title = "交互侦察（先点这里）", Opened = true })
+
+	secRecon:Paragraph({
+		Title = "这个游戏到底靠什么交互？",
+		Desc = "现在的游戏五花八门：ProximityPrompt、ClickDetector、"
+			.. "自己画的 GUI 按钮、Tool 道具、Touched 区域……"
+			.. "先扫一遍，直接看该用下面哪个功能，不用挨个试。",
+	})
+
+	secRecon:Button({
+		Title = "扫描全部交互对象",
+		Desc = "统计数量 + 列出离你最近的 10 个",
+		Icon = "radar",
+		Callback = function()
+			local counts, nearList, guiTotal, guiShown, rE, rF, rU = reconScan()
+			local L = {}
+			table.insert(L, "[交互侦察] ══════ 交互方式清点 ══════")
+
+			local anyPart = false
+			for _, r in ipairs(RECON_LIST) do
+				local c = counts[r.cls] or 0
+				if c > 0 then anyPart = true end
+				table.insert(L, string.format("  %-42s %d 个", r.name, c))
+			end
+			local tc = counts["TouchTransmitter"] or 0
+			if tc > 0 then
+				table.insert(L, string.format("  %-42s %d 个", "触碰区域 TouchTransmitter", tc))
+			end
+
+			table.insert(L, string.format("  %-42s %d 个（可见 %d）", "屏幕按钮 PlayerGui", guiTotal, guiShown))
+			table.insert(L, string.format("  %-42s %d 个", "RemoteEvent", rE))
+			table.insert(L, string.format("  %-42s %d 个", "RemoteFunction", rF))
+			table.insert(L, string.format("  %-42s %d 个", "UnreliableRemoteEvent", rU))
+
+			-- 结论
+			table.insert(L, "")
+			table.insert(L, "── 建议 ──")
+			local tips = {}
+			if (counts["ProximityPrompt"] or 0) > 0 then
+				table.insert(tips, "有 ProximityPrompt → 用「可互动类物体」的触发按钮或快速互动")
+			end
+			if (counts["ClickDetector"] or 0) > 0 then
+				table.insert(tips, "有 ClickDetector → 用「可点击类物体」")
+			end
+			if (counts["Dialog"] or 0) > 0 then
+				table.insert(tips, "有官方 Dialog → 用「对话框触发」的老按钮")
+			end
+			if guiShown > 0 then
+				table.insert(tips, "屏幕上有可见按钮 → 用「GUI按钮触发」或「屏幕对话」")
+			end
+			if (counts["Tool"] or 0) > 0 then
+				table.insert(tips, "有 Tool 道具 → 用「Tool 道具触发」")
+			end
+			if (counts["Seat"] or 0) + (counts["VehicleSeat"] or 0) > 0 then
+				table.insert(tips, "有座位 → 用「座位/载具触发」")
+			end
+			if #tips == 0 then
+				table.insert(tips, "一个可交互对象都没扫到 —— 这游戏可能全靠远程事件驱动，"
+					.. "去「远程事件(进阶)」开监听看看")
+			end
+			for _, t in ipairs(tips) do table.insert(L, "  · " .. t) end
+
+			-- 最近的
+			if #nearList > 0 then
+				table.insert(L, "")
+				table.insert(L, "── 离你最近的 10 个 ──")
+				for i = 1, math.min(10, #nearList) do
+					local it = nearList[i]
+					table.insert(L, string.format("  %6.1f 格  %-24s %s",
+						it.dist, it.cls, it.obj:GetFullName()))
+				end
+			end
+
+			lastRecon = nearList
+			local txt = table.concat(L, "\n")
+			print(txt)
+			say("交互侦察", string.format("扫完了，共 %d 个近点对象，详见控制台", #nearList))
+		end,
+	})
+
+	secRecon:Button({
+		Title = "一键全试（危险，可能误触）",
+		Desc = "按距离从近到远，把所有能触发的都触发一遍",
+		Icon = "zap",
+		Callback = function()
+			local counts, nearList = reconScan()
+			local n = 0
+			for _, it in ipairs(nearList) do
+				local o = it.obj
+				local ok = pcall(function()
+					if o:IsA("ProximityPrompt") and hasFirePrompt then
+						o.HoldDuration = 0
+						o.Enabled = true
+						fireproximityprompt(o)
+					elseif o:IsA("ClickDetector") and hasFireClick then
+						fireclickdetector(o)
+					elseif o:IsA("Seat") or o:IsA("VehicleSeat") then
+						if hasFireTouch then
+							local root = localRoot()
+							if root then
+								firetouchinterest(root, o, 0)
+								task.wait()
+								firetouchinterest(root, o, 1)
+							end
+						end
+					end
+				end)
+				if ok then n = n + 1 end
+				task.wait(0.03)
+			end
+			say("交互侦察", string.format("已尝试触发 %d 个对象", n))
+		end,
+	})
+
+	secRecon:Button({
+		Title = "传送到最近的交互点",
+		Desc = "把角色挪到最近的 ProximityPrompt / ClickDetector 旁边",
+		Icon = "map-pin",
+		Callback = function()
+			local counts, nearList = reconScan()
+			local root = localRoot()
+			if not root then
+				say("交互侦察", "找不到角色", "x")
+				return
+			end
+			for _, it in ipairs(nearList) do
+				local o = it.obj
+				if o:IsA("ProximityPrompt") or o:IsA("ClickDetector") then
+					local part = o.Parent
+					if part and part:IsA("BasePart") then
+						pcall(function()
+							root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
+						end)
+						say("交互侦察", string.format("已传送到 %s", o:GetFullName()))
+						return
+					end
+				end
+			end
+			say("交互侦察", "附近没有可传送的交互点", "x")
+		end,
+	})
+
 	local secTouch = tab:Section({ Title = "可触碰类物体（TouchInterests）", Opened = true })  -- 源 9613（源里是折叠的）
 
 	-- 源 9615
@@ -1169,6 +1507,130 @@ return function(tab, ctx)
 		end,
 	})
 
+	-- ── 现代适配：自定义提示 UI ─────────────────────────────────────────
+	-- 有些游戏嫌 ProximityPrompt 不好看，自己画一个「按 E」的提示框。
+	-- 那种情况 fireproximityprompt 完全没用，得靠模拟按键或者直接点它。
+	secPrompt:Paragraph({
+		Title = "部分游戏不用 ProximityPrompt",
+		Desc = "有些游戏自己画「按 E / 按住」的提示框，那不是 ProximityPrompt 实例，"
+			.. "扫不到也 fire 不到。下面两个按钮专门对付这种情况。",
+	})
+
+	local function findPromptUI()
+		local pg = LP:FindFirstChildOfClass("PlayerGui")
+		local out = {}
+		if not pg then return out end
+		for _, d in ipairs(pg:GetDescendants()) do
+			if (d:IsA("TextLabel") or d:IsA("TextButton")) and reconVisible(d) and not reconOwnGui(d) then
+				local t = ""
+				pcall(function() t = tostring(d.Text or "") end)
+				if t ~= "" and #t <= 24 then
+					local low = t:lower()
+					if t:match("^%s*%[?%s*[Ee]%s*%]?%s*$")
+						or low:find("hold", 1, true)
+						or low:find("press", 1, true)
+						or t:find("按住") or t:find("长按") or t:find("按E") or t:find("按 E") then
+						table.insert(out, { obj = d, text = t })
+					end
+				end
+			end
+		end
+		return out
+	end
+
+	secPrompt:Button({
+		Title = "检测自定义提示UI",
+		Desc = "在屏幕上找「按E / 按住 / hold」这类提示框",
+		Icon = "search",
+		Callback = function()
+			local list = findPromptUI()
+			if #list == 0 then
+				say("提示UI", "没找到自定义提示框（这游戏大概用标准 ProximityPrompt）")
+				return
+			end
+			print("[提示UI] ══════ 找到的自定义提示 ══════")
+			for i, it in ipairs(list) do
+				print(string.format("  %d. [%s]  %s", i, it.text, it.obj:GetFullName()))
+			end
+			say("提示UI", string.format("找到 %d 个提示框，详见控制台", #list))
+		end,
+	})
+
+	secPrompt:Button({
+		Title = "模拟按 E 键",
+		Desc = "给那种「按 E 交互」的自定义 UI 用（没反应就多按几次）",
+		Icon = "keyboard",
+		Callback = function()
+			-- 0x45 = E 键。keypress / keyrelease 是执行器提供的虚拟按键函数
+			local ok1 = pcall(function()
+				if type(keypress) == "function" then keypress(0x45) end
+			end)
+			task.wait(0.08)
+			pcall(function()
+				if type(keyrelease) == "function" then keyrelease(0x45) end
+			end)
+			if ok1 then
+				say("提示UI", "已模拟按下 E 键")
+			else
+				say("提示UI", "执行器没有 keypress，改用下面的按钮直接点提示框", "x")
+			end
+		end,
+	})
+
+	secPrompt:Button({
+		Title = "直接点提示框",
+		Desc = "把屏幕上所有提示框当按钮点一遍",
+		Icon = "mouse-pointer-click",
+		Callback = function()
+			local list = findPromptUI()
+			local n = 0
+			for _, it in ipairs(list) do
+				local o = it.obj
+				local ok = pcall(function()
+					if o:IsA("TextButton") then
+						clickGuiButton(o)
+					else
+						-- TextLabel 不是按钮，试着点它的父级
+						local p = o.Parent
+						local tries = 0
+						while p and tries < 3 do
+							if p:IsA("TextButton") or p:IsA("ImageButton") then
+								clickGuiButton(p)
+								break
+							end
+							p = p.Parent
+							tries = tries + 1
+						end
+					end
+				end)
+				if ok then n = n + 1 end
+				task.wait(0.1)
+			end
+			say("提示UI", string.format("点了 %d 个提示框", n))
+		end,
+	})
+
+	secPrompt:Button({
+		Title = "重设全部 Prompt（回满血）",
+		Desc = "把 Enabled 打开、HoldDuration 清零、MaxActivationDistance 拉大",
+		Icon = "wrench",
+		Callback = function()
+			local n = 0
+			for _, d in ipairs(workspace:GetDescendants()) do
+				if d:IsA("ProximityPrompt") then
+					pcall(function()
+						d.Enabled = true
+						d.HoldDuration = 0
+						d.MaxActivationDistance = 100000
+						d.RequiresLineOfSight = false
+						n = n + 1
+					end)
+				end
+			end
+			say("触发", string.format("已重设 %d 个 ProximityPrompt", n))
+		end,
+	})
+
 	local secTouched = tab:Section({ Title = "直接触碰事件（Touched）", Opened = false })  -- 源 9714
 
 	-- 源 9716
@@ -1242,10 +1704,66 @@ return function(tab, ctx)
 
 	local secGui = tab:Section({ Title = "GUI按钮触发", Opened = false })  -- 源 9746
 
-	-- 源 9748
+	secGui:Paragraph({
+		Title = "现代游戏基本都靠 GUI",
+		Desc = "原来的「触发所有GUI按钮」是无差别点全部，容易乱点。"
+			.. "现在加了两层过滤：跳过隐藏按钮、跳过看板自己的菜单，"
+			.. "还能按关键词只点某类按钮。",
+	})
+
+	secGui:Button({
+		Title = "扫描GUI按钮",
+		Desc = "按所在界面分组列出，标出哪些命中关键词",
+		Icon = "search",
+		Callback = function()
+			local pg = LP:FindFirstChildOfClass("PlayerGui")
+			if not pg then
+				say("GUI", "没有 PlayerGui", "x")
+				return
+			end
+			local byGui = {}
+			local total = 0
+			for _, d in ipairs(pg:GetChildren()) do
+				if d:IsA("ScreenGui") then
+					local items = {}
+					for _, c in ipairs(d:GetDescendants()) do
+						if (c:IsA("TextButton") or c:IsA("ImageButton"))
+							and reconVisible(c) and not reconOwnGui(c) then
+							table.insert(items, c)
+						end
+					end
+					if #items > 0 then
+						byGui[d.Name] = items
+						total = total + #items
+					end
+				end
+			end
+			print("[GUI] ══════ 可见按钮分布 ══════")
+			for name, items in pairs(byGui) do
+				print(string.format("  [%s] %d 个", name, #items))
+				for i, c in ipairs(items) do
+					if i > 8 then
+						print(string.format("      …还有 %d 个", #items - 8))
+						break
+					end
+					local t = ""
+					pcall(function()
+						if c:IsA("TextButton") then t = tostring(c.Text or "") end
+					end)
+					print(string.format("      %-20s %s", t:sub(1, 20), c.Name))
+				end
+			end
+			say("GUI", string.format("可见按钮共 %d 个，分布在 %d 个界面", total, (function()
+				local k = 0
+				for _ in pairs(byGui) do k = k + 1 end
+				return k
+			end)()))
+		end,
+	})
+
 	secGui:Button({
 		Title = "触发所有GUI按钮",
-		Desc = "对 PlayerGui 里所有 TextButton / ImageButton 调用 firesignal",
+		Desc = "跳过隐藏按钮和看板自己的菜单",
 		Icon = "square-mouse-pointer",
 		Callback = function()
 			if not hasFireSignal then
@@ -1257,10 +1775,33 @@ return function(tab, ctx)
 		end,
 	})
 
-	-- 源 9756（fn103 / fn104）
+	secGui:Button({
+		Title = "按关键词触发GUI按钮",
+		Desc = "只点文字里含关键词的按钮（关键词在「屏幕对话」里配）",
+		Icon = "filter",
+		Callback = function()
+			local pg = LP:FindFirstChildOfClass("PlayerGui")
+			if not pg then return end
+			local words = parseWords(S.DialogWords) or DIALOG_WORDS
+			local block = parseWords(S.DialogBlock) or DIALOG_BLOCK
+			local n = 0
+			for _, d in ipairs(pg:GetDescendants()) do
+				if d:IsA("TextButton") or d:IsA("ImageButton") then
+					if reconVisible(d) and not reconOwnGui(d) then
+						local txt = btnLabelText(d)
+						if not hitWords(txt, block) and hitWords(txt, words) then
+							if clickGuiButton(d) then n = n + 1 end
+						end
+					end
+				end
+			end
+			say("GUI", string.format("按关键词点击了 %d 个", n))
+		end,
+	})
+
 	secGui:Toggle({
 		Title = "自动点击GUI按钮",
-		Desc = "源里固定 1 秒一轮",
+		Desc = "每 1 秒点一轮（跳过隐藏和自身菜单）",
 		Value = false,
 		Callback = function(on)
 			if on then
@@ -1277,7 +1818,6 @@ return function(tab, ctx)
 		end,
 	})
 
-	-- 源 9768（原来的绝对坐标 TextLabel，这里改成 UIStroke）
 	secGui:Toggle({
 		Title = "高亮可点击GUI",
 		Desc = "给可点击按钮加黄框（自己重写，不框我们自己的菜单）",
@@ -1290,6 +1830,118 @@ return function(tab, ctx)
 				espFree("gui")
 				say("触发", "GUI 高亮已关闭")
 			end
+		end,
+	})
+
+	-- ═══════════════════════════════════════════════════════════════════════
+	-- Tool 道具触发（新增）
+	--   很多现代游戏的核心交互是"用道具"：手电、钥匙、药、工具枪。
+	--   Tool:Activate() 是客户端正向接口，走的是和玩家点击完全一样的路径。
+	-- ═══════════════════════════════════════════════════════════════════════
+	local function scanTools()
+		local out = {}
+		local bag = LP:FindFirstChildOfClass("Backpack")
+		if bag then
+			for _, c in ipairs(bag:GetChildren()) do
+				if c:IsA("Tool") then
+					table.insert(out, { tool = c, where = "背包" })
+				end
+			end
+		end
+		local ch = localChar()
+		if ch then
+			for _, c in ipairs(ch:GetChildren()) do
+				if c:IsA("Tool") then
+					table.insert(out, { tool = c, where = "已装备" })
+				end
+			end
+		end
+		return out
+	end
+
+	local function activateAllTools()
+		local ch = localChar()
+		local list = scanTools()
+		local n = 0
+		for _, it in ipairs(list) do
+			pcall(function()
+				if it.where == "背包" and ch then
+					it.tool.Parent = ch
+					task.wait(0.12)
+				end
+				it.tool:Activate()
+				n = n + 1
+			end)
+			task.wait(0.15)
+		end
+		return n
+	end
+
+	local secTool = tab:Section({ Title = "Tool 道具触发", Opened = false })
+
+	secTool:Paragraph({
+		Title = "道具交互",
+		Desc = "手电、钥匙、药品、工具枪这类，游戏都靠 Tool:Activate() 触发。"
+			.. "这是客户端正向接口，和玩家自己点道具走同一条路，服务端认。",
+	})
+
+	secTool:Button({
+		Title = "扫描背包道具",
+		Icon = "briefcase",
+		Callback = function()
+			local list = scanTools()
+			print("[道具] ══════ 背包 ══════")
+			for i, it in ipairs(list) do
+				print(string.format("  %d. [%s] %s  ClassName=%s",
+					i, it.where, it.tool.Name, it.tool.ClassName))
+			end
+			say("道具", string.format("扫到 %d 个 Tool", #list))
+		end,
+	})
+
+	secTool:Button({
+		Title = "激活全部道具",
+		Desc = "逐个装备并 Activate（每个间隔 0.15 秒）",
+		Icon = "zap",
+		Callback = function()
+			local n = activateAllTools()
+			say("道具", string.format("已激活 %d 个道具", n))
+		end,
+	})
+
+	secTool:Toggle({
+		Title = "自动激活道具",
+		Desc = "每 1.5 秒 Activate 一轮",
+		Value = false,
+		Callback = function(on)
+			if on then
+				autoStart("tool", "自动激活道具", activateAllTools, 1.5)
+				say("道具", "自动激活道具 已开启")
+			else
+				autoStop("tool")
+				say("道具", "自动激活道具 已停止")
+			end
+		end,
+	})
+
+	secTool:Button({
+		Title = "卸下全部道具",
+		Desc = "把已装备的 Tool 放回背包（有的游戏需要空手触发）",
+		Icon = "undo",
+		Callback = function()
+			local bag = LP:FindFirstChildOfClass("Backpack")
+			local ch = localChar()
+			if not bag or not ch then return end
+			local n = 0
+			for _, c in ipairs(ch:GetChildren()) do
+				if c:IsA("Tool") then
+					pcall(function()
+						c.Parent = bag
+						n = n + 1
+					end)
+				end
+			end
+			say("道具", string.format("已卸下 %d 个", n))
 		end,
 	})
 
@@ -1377,103 +2029,6 @@ return function(tab, ctx)
 	--   一个面板 + 几个 TextButton。原版只认 Dialog，所以这些游戏全触发不了。
 	--   这里改成扫描 PlayerGui 里的可见按钮，按文字匹配关键词，再 firesignal 点掉。
 	-- ═══════════════════════════════════════════════════════════════════════
-	local hasGetConn = type(getconnections) == "function"
-
-	local DIALOG_WORDS = {
-		"继续", "下一个", "下一步", "下一页", "确定", "确认", "好的", "好呀",
-		"接受", "同意", "开始", "开始游戏", "跳过", "关闭", "了解", "知道了",
-		"进入", "出发", "走吧", "对话", "交谈", "说话", "没问题", "收到",
-		"continue", "next", "okay", "ok", "yes", "accept", "agree", "start",
-		"skip", "close", "got it", "proceed", "talk", "speak",
-	}
-	local DIALOG_BLOCK = {
-		"购买", "充值", "支付", "付费", "订阅", "分享", "举报", "删除", "退出",
-		"robux", "buy", "purchase", "pay", "store", "shop", "subscribe", "price",
-	}
-
-	local function parseWords(s)
-		local out = {}
-		if type(s) ~= "string" then return nil end
-		for w in s:gmatch("[^,，%s]+") do
-			if #w > 0 then table.insert(out, w) end
-		end
-		return #out > 0 and out or nil
-	end
-
-	local function btnChainVisible(obj)
-		local p = obj
-		while p and p ~= game do
-			if p:IsA("GuiObject") and not p.Visible then return false end
-			if p:IsA("LayerCollector") and not p.Enabled then return false end
-			p = p.Parent
-		end
-		return true
-	end
-
-	local function btnLabelText(b)
-		local t = ""
-		pcall(function()
-			if b:IsA("TextButton") then t = tostring(b.Text or "") end
-		end)
-		if t == "" then
-			pcall(function()
-				for _, c in ipairs(b:GetDescendants()) do
-					if c:IsA("TextLabel") and tostring(c.Text or "") ~= "" then
-						t = tostring(c.Text)
-						break
-					end
-				end
-			end)
-		end
-		return t
-	end
-
-	local function hitWords(text, list)
-		if text == "" or not list then return nil end
-		local low = text:lower()
-		for _, w in ipairs(list) do
-			if low:find(w:lower(), 1, true) then return w end
-		end
-		return nil
-	end
-
-	local function clickGuiButton(b)
-		-- 不同游戏监听的事件不一样：
-		--   桌面端常用 MouseButton1Click / Activated
-		--   移动端按钮常挂 TouchTap
-		--   有些 UI 库只用 MouseButton1Down + Up 组合
-		-- 全试一遍，只对真有连接的事件动手，避免制造副作用。
-		local events = {}
-		pcall(function()
-			table.insert(events, b.MouseButton1Click)
-			table.insert(events, b.Activated)
-			table.insert(events, b.MouseButton1Down)
-			table.insert(events, b.MouseButton1Up)
-			table.insert(events, b.TouchTap)
-		end)
-
-		local fired = false
-		for _, ev in ipairs(events) do
-			if hasGetConn then
-				local okc, conns = pcall(getconnections, ev)
-				if okc and type(conns) == "table" and #conns > 0 then
-					pcall(function()
-						for _, c in ipairs(conns) do
-							pcall(function() c:Fire() end)
-						end
-					end)
-					fired = true
-				end
-			end
-			if hasFireSignal and not fired then
-				local okf = pcall(firesignal, ev)
-				if okf then fired = true end
-			end
-		end
-		return fired
-	end
-
-	local dialogLog = {}
 
 	local function scanScreenDialogs()
 		local pg = LP:FindFirstChildOfClass("PlayerGui")
@@ -1716,6 +2271,132 @@ return function(tab, ctx)
 				autoStop("replay")
 				say("远程", "自动重放远程事件 已停止")
 			end
+		end,
+	})
+
+	-- ── 现代适配：远程对象全景 ───────────────────────────────────────────
+	secRemote:Paragraph({
+		Title = "现代游戏的远程结构",
+		Desc = "老的只有 RemoteEvent。现在还有 RemoteFunction（要返回值）和 "
+			.. "UnreliableRemoteEvent（不保证送达、低延迟）。"
+			.. "只监听 RemoteEvent 会漏掉一大半。",
+	})
+
+	local function scanRemotes()
+		local e, f, u = {}, {}, {}
+		pcall(function()
+			for _, d in ipairs(game:GetDescendants()) do
+				if d:IsA("RemoteEvent") then
+					table.insert(e, d)
+				elseif d:IsA("RemoteFunction") then
+					table.insert(f, d)
+				elseif d:IsA("UnreliableRemoteEvent") then
+					table.insert(u, d)
+				end
+			end
+		end)
+		return e, f, u
+	end
+
+	secRemote:Button({
+		Title = "扫描远程对象",
+		Desc = "统计 RemoteEvent / RemoteFunction / Unreliable 三类，列出名字",
+		Icon = "radar",
+		Callback = function()
+			local e, f, u = scanRemotes()
+			print(string.format("[远程] ══════ RemoteEvent %d / RemoteFunction %d / Unreliable %d ══════",
+				#e, #f, #u))
+			local function dump(tag, list)
+				for i, d in ipairs(list) do
+					if i > 25 then
+						print(string.format("  …%s 还有 %d 个", tag, #list - 25))
+						break
+					end
+					print(string.format("  [%s] %s", tag, d:GetFullName()))
+				end
+			end
+			dump("Event", e)
+			dump("Func", f)
+			dump("Unrel", u)
+			say("远程", string.format("Event %d / Function %d / Unreliable %d", #e, #f, #u))
+		end,
+	})
+
+	-- RemoteFunction 监听：改 OnClientInvoke，服务端来调用时记一笔
+	local rfHooked = {}
+	local rfLog = {}
+
+	local function hookRemoteFunctions()
+		local _, fList = scanRemotes()
+		local n = 0
+		for _, rf in ipairs(fList) do
+			if not rfHooked[rf] then
+				rfHooked[rf] = true
+				pcall(function()
+					local old = rf.OnClientInvoke
+					rf.OnClientInvoke = function(...)
+						table.insert(rfLog, 1, {
+							name = rf:GetFullName(),
+							args = { ... },
+							n = select("#", ...),
+						})
+						if #rfLog > 100 then table.remove(rfLog) end
+						if type(old) == "function" then
+							return old(...)
+						end
+					end
+					n = n + 1
+				end)
+			end
+		end
+		return n
+	end
+
+	secRemote:Button({
+		Title = "监听 RemoteFunction（服务端→客户端）",
+		Desc = "劫持 OnClientInvoke，记录服务端主动调用你的参数",
+		Icon = "plug",
+		Callback = function()
+			local n = hookRemoteFunctions()
+			say("远程", string.format("已挂上 %d 个 RemoteFunction", n))
+		end,
+	})
+
+	secRemote:Button({
+		Title = "显示 RemoteFunction 调用记录",
+		Icon = "list",
+		Callback = function()
+			if #rfLog == 0 then
+				say("远程", "还没有记录（服务端没调用过，或者还没挂监听）")
+				return
+			end
+			print("[远程] ══════ RemoteFunction 调用记录 ══════")
+			for i, r in ipairs(rfLog) do
+				if i > 30 then break end
+				local parts = {}
+				for k = 1, r.n do
+					table.insert(parts, tostring(r.args[k]))
+				end
+				print(string.format("  %d. %s(%s)", i, r.name, table.concat(parts, ", ")))
+			end
+			say("远程", string.format("共 %d 条，详见控制台", #rfLog))
+		end,
+	})
+
+	secRemote:Button({
+		Title = "还原 RemoteFunction",
+		Desc = "把 OnClientInvoke 恢复成 nil（游戏可能因此报错，慎用）",
+		Icon = "undo",
+		Callback = function()
+			local n = 0
+			for rf in pairs(rfHooked) do
+				pcall(function()
+					rf.OnClientInvoke = nil
+					n = n + 1
+				end)
+			end
+			rfHooked = {}
+			say("远程", string.format("已还原 %d 个", n))
 		end,
 	})
 
