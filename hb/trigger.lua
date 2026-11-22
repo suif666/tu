@@ -1370,6 +1370,164 @@ return function(tab, ctx)
 
 	local secDialog = tab:Section({ Title = "对话框触发", Opened = false })  -- 源 9872
 
+	-- ═══════════════════════════════════════════════════════════════════════
+	-- 屏幕对话触发（新增）
+	--
+	--   官方 Dialog 实例早就没游戏用了 —— 现在的对话全是自定义 ScreenGui：
+	--   一个面板 + 几个 TextButton。原版只认 Dialog，所以这些游戏全触发不了。
+	--   这里改成扫描 PlayerGui 里的可见按钮，按文字匹配关键词，再 firesignal 点掉。
+	-- ═══════════════════════════════════════════════════════════════════════
+	local hasGetConn = type(getconnections) == "function"
+
+	local DIALOG_WORDS = {
+		"继续", "下一个", "下一步", "下一页", "确定", "确认", "好的", "好呀",
+		"接受", "同意", "开始", "开始游戏", "跳过", "关闭", "了解", "知道了",
+		"进入", "出发", "走吧", "对话", "交谈", "说话", "没问题", "收到",
+		"continue", "next", "okay", "ok", "yes", "accept", "agree", "start",
+		"skip", "close", "got it", "proceed", "talk", "speak",
+	}
+	local DIALOG_BLOCK = {
+		"购买", "充值", "支付", "付费", "订阅", "分享", "举报", "删除", "退出",
+		"robux", "buy", "purchase", "pay", "store", "shop", "subscribe", "price",
+	}
+
+	local function parseWords(s)
+		local out = {}
+		if type(s) ~= "string" then return nil end
+		for w in s:gmatch("[^,，%s]+") do
+			if #w > 0 then table.insert(out, w) end
+		end
+		return #out > 0 and out or nil
+	end
+
+	local function btnChainVisible(obj)
+		local p = obj
+		while p and p ~= game do
+			if p:IsA("GuiObject") and not p.Visible then return false end
+			if p:IsA("LayerCollector") and not p.Enabled then return false end
+			p = p.Parent
+		end
+		return true
+	end
+
+	local function btnLabelText(b)
+		local t = ""
+		pcall(function()
+			if b:IsA("TextButton") then t = tostring(b.Text or "") end
+		end)
+		if t == "" then
+			pcall(function()
+				for _, c in ipairs(b:GetDescendants()) do
+					if c:IsA("TextLabel") and tostring(c.Text or "") ~= "" then
+						t = tostring(c.Text)
+						break
+					end
+				end
+			end)
+		end
+		return t
+	end
+
+	local function hitWords(text, list)
+		if text == "" or not list then return nil end
+		local low = text:lower()
+		for _, w in ipairs(list) do
+			if low:find(w:lower(), 1, true) then return w end
+		end
+		return nil
+	end
+
+	local function clickGuiButton(b)
+		-- 不同游戏监听的事件不一样：
+		--   桌面端常用 MouseButton1Click / Activated
+		--   移动端按钮常挂 TouchTap
+		--   有些 UI 库只用 MouseButton1Down + Up 组合
+		-- 全试一遍，只对真有连接的事件动手，避免制造副作用。
+		local events = {}
+		pcall(function()
+			table.insert(events, b.MouseButton1Click)
+			table.insert(events, b.Activated)
+			table.insert(events, b.MouseButton1Down)
+			table.insert(events, b.MouseButton1Up)
+			table.insert(events, b.TouchTap)
+		end)
+
+		local fired = false
+		for _, ev in ipairs(events) do
+			if hasGetConn then
+				local okc, conns = pcall(getconnections, ev)
+				if okc and type(conns) == "table" and #conns > 0 then
+					pcall(function()
+						for _, c in ipairs(conns) do
+							pcall(function() c:Fire() end)
+						end
+					end)
+					fired = true
+				end
+			end
+			if hasFireSignal and not fired then
+				local okf = pcall(firesignal, ev)
+				if okf then fired = true end
+			end
+		end
+		return fired
+	end
+
+	local dialogLog = {}
+
+	local function scanScreenDialogs()
+		local pg = LP:FindFirstChildOfClass("PlayerGui")
+		if not pg then return 0 end
+		local words = parseWords(S.DialogWords) or DIALOG_WORDS
+		local block = parseWords(S.DialogBlock) or DIALOG_BLOCK
+		local allMode = (S.DialogAll == true)
+		local n = 0
+		local seen = {}
+		for _, d in ipairs(pg:GetDescendants()) do
+			local okA = pcall(function() return d:IsA("TextButton") or d:IsA("ImageButton") end)
+			if okA and (d:IsA("TextButton") or d:IsA("ImageButton")) then
+				if not guiEspSkip(d) and btnChainVisible(d) then
+					local txt = btnLabelText(d)
+					local blocked = hitWords(txt, block)
+					local wanted = allMode or hitWords(txt, words)
+					if not blocked and wanted then
+						local key = d:GetFullName()
+						if not seen[key] then
+							seen[key] = true
+							if clickGuiButton(d) then
+								n = n + 1
+								table.insert(dialogLog, 1, txt ~= "" and txt or "(无文字)")
+								if #dialogLog > 10 then table.remove(dialogLog) end
+							end
+						end
+					end
+				end
+			end
+		end
+		return n
+	end
+
+	-- 只扫描不点击，用于「扫描」按钮
+	local function listScreenDialogs()
+		local pg = LP:FindFirstChildOfClass("PlayerGui")
+		local out = {}
+		if not pg then return out end
+		local words = parseWords(S.DialogWords) or DIALOG_WORDS
+		for _, d in ipairs(pg:GetDescendants()) do
+			if d:IsA("TextButton") or d:IsA("ImageButton") then
+				if not guiEspSkip(d) and btnChainVisible(d) then
+					local txt = btnLabelText(d)
+					table.insert(out, {
+						text = txt,
+						path = d:GetFullName(),
+						hit = hitWords(txt, words) ~= nil,
+					})
+				end
+			end
+		end
+		return out
+	end
+
 	-- 源 9874（fn108）
 	secDialog:Button({
 		Title = "触发所有对话框",
@@ -1407,6 +1565,108 @@ return function(tab, ctx)
 			local n = tonumber(v) or tonumber(readInput(inputDialogRange))
 			if n and n > 0 then
 				S.DialogRange = n
+			end
+		end,
+	})
+
+	-- ── 屏幕对话（自定义 GUI）────────────────────────────────────────────
+	secDialog:Paragraph({
+		Title = "屏幕对话（自定义 GUI）",
+		Desc = "官方 Dialog 实例现在几乎没游戏用了。这一段扫的是屏幕上的按钮："
+			.. "按「对话关键词」匹配文字，用 firesignal 直接点掉。"
+			.. "要自动连点剧情对话就用「自动连续对话」。",
+	})
+
+	secDialog:Button({
+		Title = "扫描屏幕对话选项",
+		Desc = "只列出当前看得见的按钮，不点击",
+		Icon = "search",
+		Callback = function()
+			local list = listScreenDialogs()
+			local nHit = 0
+			for _, it in ipairs(list) do
+				if it.hit then nHit = nHit + 1 end
+			end
+			say("屏幕对话", string.format("可见按钮 %d 个，命中关键词 %d 个（详见控制台）", #list, nHit))
+			print("[屏幕对话] ───── 扫描结果 ─────")
+			for i, it in ipairs(list) do
+				if i > 40 then
+					print(string.format("  …还有 %d 个", #list - 40))
+					break
+				end
+				print(string.format("  %s %-24s  %s",
+					it.hit and "★" or " ", tostring(it.text):sub(1, 24), it.path))
+			end
+		end,
+	})
+
+	secDialog:Button({
+		Title = "触发屏幕对话（一次）",
+		Desc = "只点当前命中的，点完不重复",
+		Icon = "mouse-pointer-click",
+		Callback = function()
+			local n = scanScreenDialogs()
+			say("屏幕对话", string.format("已点击 %d 个对话按钮", n))
+		end,
+	})
+
+	secDialog:Toggle({
+		Title = "自动连续对话",
+		Desc = "每 0.5 秒扫一次并点击，适合走完整段剧情",
+		Value = false,
+		Callback = function(on)
+			if on then
+				autoStart("screendialog", "自动连续对话", scanScreenDialogs, 0.5)
+				say("屏幕对话", "自动连续对话 已开启")
+			else
+				autoStop("screendialog")
+				say("屏幕对话", "自动连续对话 已停止")
+			end
+		end,
+	})
+
+	secDialog:Toggle({
+		Title = "全部按钮模式",
+		Desc = "不匹配关键词，点所有可见按钮（排除词仍然生效）。慎用",
+		Value = false,
+		Callback = function(on)
+			S.DialogAll = on and true or false
+			say("屏幕对话", "全部按钮模式 " .. (on and "已开启（会点很多按钮）" or "已关闭"))
+		end,
+	})
+
+	secDialog:Input({
+		Title = "对话关键词",
+		Desc = "逗号分隔。留空用内置表（继续/下一个/确定/accept/next…）",
+		Placeholder = "继续,下一个,确定,ok,next",
+		Value = "",
+		Callback = function(v)
+			S.DialogWords = tostring(v or "")
+		end,
+	})
+
+	secDialog:Input({
+		Title = "排除词",
+		Desc = "含这些字的按钮绝对不点（防误触购买/充值）",
+		Placeholder = "购买,充值,robux,buy",
+		Value = "",
+		Callback = function(v)
+			S.DialogBlock = tostring(v or "")
+		end,
+	})
+
+	secDialog:Button({
+		Title = "查看最近点击记录",
+		Icon = "list",
+		Callback = function()
+			if #dialogLog == 0 then
+				say("屏幕对话", "还没有点击记录")
+				return
+			end
+			say("屏幕对话", string.format("最近 %d 条，详见控制台", #dialogLog))
+			print("[屏幕对话] ───── 最近点击 ─────")
+			for i, t in ipairs(dialogLog) do
+				print(string.format("  %d. %s", i, t))
 			end
 		end,
 	})
