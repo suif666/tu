@@ -1115,7 +1115,7 @@ end)
 wait(0.5)
 
 -- ===== 加载外部脚本 =====
-local ScriptUrl = "https://raw.githubusercontent.com/RobloxHacks/Roblox-Hacks/main/Catsaken.lua"
+local ScriptUrl = "https://pastebin.com/raw/r3WVkx7n"
 if ScriptUrl == "" then
     warn("[汉化] 外部脚本 URL 未填写，跳过外部脚本加载")
 else
